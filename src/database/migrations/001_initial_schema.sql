@@ -1,6 +1,6 @@
 -- =============================================================================
 -- Signature by Sarah (SBS) — Phase 3 Migration
--- Database: PostgreSQL via Supabase
+-- Database: standard PostgreSQL
 -- =============================================================================
 
 
@@ -36,11 +36,12 @@ $$ LANGUAGE plpgsql;
 -- -----------------------------------------------------------------------------
 
 -- profiles
--- Extends Supabase auth.users. One profile is created per auth user via trigger.
--- All application tables reference profiles.id, not auth.users.id directly.
+-- Backend-owned account and application profile. All application tables reference
+-- profiles.id directly, keeping identity and ecommerce authorization together.
 CREATE TABLE profiles (
   id              UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
-  auth_user_id    UUID          NOT NULL,
+  email           VARCHAR(255)  NOT NULL,
+  password_hash   TEXT          NOT NULL,
   full_name       VARCHAR(255)  NOT NULL,
   phone           VARCHAR(50)   NULL,
   avatar_url      TEXT          NULL,
@@ -49,11 +50,8 @@ CREATE TABLE profiles (
   created_at      TIMESTAMPTZ   NOT NULL DEFAULT now(),
   updated_at      TIMESTAMPTZ   NOT NULL DEFAULT now(),
 
-  CONSTRAINT profiles_auth_user_id_fkey
-    FOREIGN KEY (auth_user_id) REFERENCES auth.users(id) ON DELETE CASCADE,
-
-  CONSTRAINT profiles_auth_user_id_unique
-    UNIQUE (auth_user_id),
+  CONSTRAINT profiles_email_unique
+    UNIQUE (email),
 
   CONSTRAINT profiles_role_check
     CHECK (role IN ('customer', 'admin', 'super_admin'))
@@ -538,7 +536,7 @@ CREATE TABLE academy_registrations (
 -- =============================================================================
 
 -- profiles
-CREATE INDEX idx_profiles_auth_user_id   ON profiles(auth_user_id);
+CREATE INDEX idx_profiles_email           ON profiles(email);
 CREATE INDEX idx_profiles_role           ON profiles(role);
 
 -- collections

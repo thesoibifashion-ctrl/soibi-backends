@@ -119,7 +119,7 @@ export interface QuoteRequest {
 export interface QuoteRequestAdmin extends QuoteRequest {
   adminNotes: string | null;
   customerName: string | null;    // from profiles.full_name or guest_name
-  customerEmail: string | null;   // from auth.users.email or guest_email
+  customerEmail: string | null;   // from profiles.email or guest_email
   customerPhone: string | null;   // from profiles.phone or guest_phone
 }
 

@@ -407,11 +407,10 @@ export async function findAllCartOrdersAdmin(filters: {
        ch.payment_url, ch.receipt_url, ch.receipt_public_id, ch.shipping_tracking_number, ch.shipping_tracking_url, ch.shipping_details,
        ch.completed_at, ch.created_at,
        p.full_name  AS customer_name,
-       u.email      AS customer_email,
+       p.email      AS customer_email,
        p.phone      AS customer_phone
      FROM cart_history ch
      LEFT JOIN profiles p   ON p.id = ch.profile_id
-     LEFT JOIN auth.users u ON u.id = p.auth_user_id
      ${where}
      ORDER BY ch.completed_at DESC`,
     values,
@@ -433,11 +432,10 @@ export async function findCartOrderByIdAdmin(id: string): Promise<AdminCartOrder
        ch.payment_url, ch.receipt_url, ch.receipt_public_id, ch.shipping_tracking_number, ch.shipping_tracking_url, ch.shipping_details,
        ch.completed_at, ch.created_at,
        p.full_name  AS customer_name,
-       u.email      AS customer_email,
+       p.email      AS customer_email,
        p.phone      AS customer_phone
      FROM cart_history ch
      LEFT JOIN profiles p   ON p.id = ch.profile_id
-     LEFT JOIN auth.users u ON u.id = p.auth_user_id
      WHERE ch.id = $1`,
     [id],
   );

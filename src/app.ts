@@ -4,6 +4,7 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 
 import { corsOptions } from './config/cors.js';
+import { env } from './config/env.js';
 import { requestLogger } from './middleware/requestLogger.js';
 import { notFound } from './middleware/notFound.js';
 import { errorHandler } from './middleware/errorHandler.js';
@@ -44,7 +45,7 @@ app.get("/", (req, res) => {
 // ─── Parsing ──────────────────────────────────────────────────────────────────
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(cookieParser());
+app.use(cookieParser(env.googleOAuthStateSecret));
 
 // ─── Logging ──────────────────────────────────────────────────────────────────
 app.use(requestLogger);

@@ -242,11 +242,10 @@ export async function findAllQuotesAdmin(status?: QuoteStatus): Promise<QuoteReq
        qr.payment_url, qr.receipt_url, qr.receipt_public_id, qr.shipping_tracking_number, qr.shipping_tracking_url, qr.shipping_details,
        qr.submitted_at, qr.reviewed_at, qr.completed_at, qr.created_at, qr.updated_at,
        COALESCE(p.full_name, qr.guest_name)  AS customer_name,
-       COALESCE(u.email,     qr.guest_email) AS customer_email,
+       COALESCE(p.email,     qr.guest_email) AS customer_email,
        COALESCE(p.phone,     qr.guest_phone) AS customer_phone
      FROM quote_requests qr
      LEFT JOIN profiles p   ON p.id = qr.profile_id
-     LEFT JOIN auth.users u ON u.id = p.auth_user_id
      ${where}
      ORDER BY qr.created_at DESC`,
     values,
@@ -262,11 +261,10 @@ export async function findQuoteByIdAdmin(id: string): Promise<QuoteRequestAdmin 
        qr.payment_url, qr.receipt_url, qr.receipt_public_id, qr.shipping_tracking_number, qr.shipping_tracking_url, qr.shipping_details,
        qr.submitted_at, qr.reviewed_at, qr.completed_at, qr.created_at, qr.updated_at,
        COALESCE(p.full_name, qr.guest_name)  AS customer_name,
-       COALESCE(u.email,     qr.guest_email) AS customer_email,
+       COALESCE(p.email,     qr.guest_email) AS customer_email,
        COALESCE(p.phone,     qr.guest_phone) AS customer_phone
      FROM quote_requests qr
      LEFT JOIN profiles p   ON p.id = qr.profile_id
-     LEFT JOIN auth.users u ON u.id = p.auth_user_id
      WHERE qr.id = $1`,
     [id],
   );

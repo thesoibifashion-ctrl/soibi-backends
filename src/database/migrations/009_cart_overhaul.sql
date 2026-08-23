@@ -1,19 +1,12 @@
 -- Migration 009: Cart overhaul
--- Adds status lifecycle, snapshot columns, size_id, nullable product_id,
--- removes guest session columns, and creates cart_history table.
+-- Adds status lifecycle, snapshot columns, nullable product_id,
+-- preserves guest-session carts, and creates cart_history table.
 
--- ─── 1. Drop guest-session constraints and columns ───────────────────────────
+-- ─── 1. Replace the single profile-cart constraint with active-cart uniqueness ─
+-- Keep session_id, expires_at, the guest-session unique constraint, and the
+-- owner check so a cart still belongs to exactly one profile or guest session.
 ALTER TABLE carts
-  DROP CONSTRAINT IF EXISTS carts_owner_check,
-  DROP CONSTRAINT IF EXISTS carts_session_id_unique,
   DROP CONSTRAINT IF EXISTS carts_profile_id_unique;
-
-DROP INDEX IF EXISTS idx_carts_session_id;
-DROP INDEX IF EXISTS idx_carts_expires_at;
-
-ALTER TABLE carts
-  DROP COLUMN IF EXISTS session_id,
-  DROP COLUMN IF EXISTS expires_at;
 
 -- ─── 2. Add status to carts ───────────────────────────────────────────────────
 ALTER TABLE carts
@@ -23,27 +16,19 @@ ALTER TABLE carts
   ADD CONSTRAINT carts_status_check
     CHECK (status IN ('active', 'submitted', 'abandoned'));
 
--- One active cart per authenticated user (partial unique index)
+-- One active cart per authenticated user (partial unique index). Guest-cart
+-- ownership remains enforced by carts_session_id_unique.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_carts_profile_id_active
   ON carts(profile_id)
   WHERE profile_id IS NOT NULL AND status = 'active';
 
--- profile_id is now required for authenticated carts
-ALTER TABLE carts
-  ALTER COLUMN profile_id SET NOT NULL;
-
 -- ─── 3. cart_items: add missing columns ──────────────────────────────────────
 ALTER TABLE cart_items
-  ADD COLUMN IF NOT EXISTS size_id               UUID          NULL,
   ADD COLUMN IF NOT EXISTS image_url_snapshot    TEXT          NULL,
   ADD COLUMN IF NOT EXISTS product_name_snapshot TEXT          NULL,
   ADD COLUMN IF NOT EXISTS selected_color        TEXT          NULL,
   ADD COLUMN IF NOT EXISTS selected_material     TEXT          NULL,
   ADD COLUMN IF NOT EXISTS selected_size         NUMERIC(6,2)  NULL;
-
-ALTER TABLE cart_items
-  ADD CONSTRAINT cart_items_size_id_fkey
-    FOREIGN KEY (size_id) REFERENCES sizes(id) ON DELETE SET NULL;
 
 -- ─── 4. Make cart_items.product_id nullable ───────────────────────────────────
 ALTER TABLE cart_items

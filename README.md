@@ -8,8 +8,8 @@ The application is built with:
 
 - Node.js and Express
 - TypeScript with strict type checking
-- PostgreSQL hosted through Supabase
-- Supabase Auth for identity and access tokens
+- PostgreSQL hosted by Pxxl Managed PostgreSQL
+- Backend-owned authentication with bcrypt password hashing and signed JWTs
 - A layered REST API architecture: routes, controllers, services, repositories, validators, and middleware
 - Resend for transactional email notifications
 
@@ -19,7 +19,8 @@ All API responses use a consistent JSON envelope with `success`, `message`, and 
 
 ## Features
 
-- Supabase authentication and application profiles
+- Backend-owned customer, admin, and super-admin accounts and profiles
+- Google OAuth sign-in alongside email/password authentication
 - Customer, admin, and super-admin roles
 - Public product, collection, material, color, carousel, and customization catalog APIs
 - Admin product management, images, variants, and collection assignments
@@ -38,8 +39,7 @@ All API responses use a consistent JSON envelope with `success`, `message`, and 
 ### Requirements
 
 - Node.js 18 or later
-- A PostgreSQL database (Supabase PostgreSQL is supported)
-- A Supabase project configured for Auth
+- A Pxxl Managed PostgreSQL database (or another standard PostgreSQL instance for local development)
 - A Resend account for email notifications
 
 ### Installation
@@ -62,11 +62,18 @@ npm run build
 
 ### Database migrations
 
-Apply the SQL files in `src/database/migrations` in numeric order to a new database. Existing deployments should apply only the new migrations:
+Apply every SQL file in `src/database/migrations` in numeric order to a new PostgreSQL database with:
+
+```bash
+npm run db:migrate
+```
+
+The command uses the existing `DATABASE_URL`, runs migrations from `001` through the latest file in numeric filename order, and stops immediately if any migration fails. It does not keep a migration-history table, so use it once for a clean Pxxl database; do not re-run it against a database where these SQL files have already been applied. The initial migration creates the backend-owned `profiles` account table; later migrations extend the ecommerce schema. A pre-existing database created from the former external-auth schema needs a separately planned account/data migration before using these revised files:
 
 - `008_one_pending_draft_per_customer.sql` — adds the partial unique index that enforces one active draft per authenticated customer at the database level.
 - `009_cart_overhaul.sql` — replaces the guest-session cart design with a status-based authenticated cart. Adds `status` (`active`, `submitted`, `abandoned`) to `carts`, a partial unique index enforcing one active cart per profile, snapshot columns on `cart_items` (`product_name_snapshot`, `image_url_snapshot`, `selected_color`, `selected_material`, `selected_size`), makes `cart_items.product_id` nullable, and creates the `cart_history` table.
 - `010_quote_contact_method.sql` — adds `contact_method` (`email`, `whatsapp`) to `quote_requests` so the customer's preferred contact channel is stored alongside the quote.
+- `016_google_oauth_profiles.sql` — allows passwordless Google-only accounts and stores Google’s immutable subject identifier.
 
 ### Production
 
@@ -84,21 +91,18 @@ All variables below are required by the current runtime configuration unless a d
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `PORT` | No (defaults to `5000`) | HTTP port used by Express. |
+| `PORT` | No (defaults to `5000`) | HTTP port used by Express. Development is currently configured to use `5001`. |
 | `NODE_ENV` | No (defaults to `development`) | Application environment; enables production database SSL behavior when set to `production`. |
 | `DATABASE_URL` | Yes | PostgreSQL connection string. |
-| `SUPABASE_URL` | Yes | Supabase project URL. |
-| `SUPABASE_ANON_KEY` | Yes | Supabase anonymous/public API key. |
-| `SUPABASE_SERVICE_ROLE_KEY` | Yes | Supabase service-role key used by the server to verify and resolve users. Keep secret. |
 | `JWT_SECRET` | Yes | Application JWT configuration value. |
 | `JWT_EXPIRES_IN` | No (defaults to `7d`) | Application JWT expiry configuration. |
-| `GOOGLE_CLIENT_ID` | Yes | Google OAuth client ID configuration. |
-| `GOOGLE_CLIENT_SECRET` | Yes | Google OAuth client secret configuration. Keep secret. |
-| `CLOUDINARY_CLOUD_NAME` | Yes | Cloudinary cloud name required by the current environment loader. |
-| `CLOUDINARY_API_KEY` | Yes | Cloudinary API key required by the current environment loader. |
-| `CLOUDINARY_API_SECRET` | Yes | Cloudinary API secret required by the current environment loader. Keep secret. |
+| `GOOGLE_CLIENT_ID` | Yes | OAuth 2.0 web-client ID from Google Cloud. |
+| `GOOGLE_CLIENT_SECRET` | Yes | OAuth 2.0 web-client secret from Google Cloud. Keep secret. |
+| `GOOGLE_OAUTH_REDIRECT_URI` | Yes | Exact Google callback URL, for example `http://localhost:5001/api/auth/google/callback`. |
+| `GOOGLE_OAUTH_STATE_SECRET` | Yes | A separate random secret used to sign the short-lived OAuth state cookie. |
 | `FRONTEND_URL` | Yes | Allowed CORS origin and base URL for customer tracking links. |
 | `ADMIN_URL` | Yes | Base URL used for admin dashboard links in notification emails. |
+| `LIVE_URL` | Yes | Additional allowed CORS origin. |
 | `RESEND_API_KEY` | Yes | Resend API key used to send transactional notifications. |
 | `RESEND_FROM_EMAIL` | Yes | A `Display Name <address@verified-domain>` sender accepted by Resend. |
 | `NOTIFICATION_EMAIL` | No (defaults to `signaturebysarah1@gmail.com`) | Recipient address for all internal order and quote notifications. |
@@ -106,21 +110,18 @@ All variables below are required by the current runtime configuration unless a d
 Example:
 
 ```env
-PORT=5000
+PORT=5001
 NODE_ENV=development
 DATABASE_URL=postgresql://...
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_ANON_KEY=...
-SUPABASE_SERVICE_ROLE_KEY=...
 JWT_SECRET=...
 JWT_EXPIRES_IN=7d
 GOOGLE_CLIENT_ID=...
 GOOGLE_CLIENT_SECRET=...
-CLOUDINARY_CLOUD_NAME=...
-CLOUDINARY_API_KEY=...
-CLOUDINARY_API_SECRET=...
+GOOGLE_OAUTH_REDIRECT_URI=http://localhost:5001/api/auth/google/callback
+GOOGLE_OAUTH_STATE_SECRET=...
 FRONTEND_URL=http://localhost:3000
 ADMIN_URL=http://localhost:3001
+LIVE_URL=http://localhost:3000
 RESEND_API_KEY=re_...
 RESEND_FROM_EMAIL="Signature By Sarah <orders@example.com>"
 NOTIFICATION_EMAIL=signaturebysarah1@gmail.com
@@ -130,7 +131,7 @@ NOTIFICATION_EMAIL=signaturebysarah1@gmail.com
 
 ## Authentication
 
-Authentication uses Supabase Auth. This API verifies a Supabase access token and resolves it to an SBS application profile.
+Authentication is owned by this backend. Passwords are hashed with `bcryptjs` before storage, and the API signs HS256 JWT access tokens using `JWT_SECRET`. The token subject is the `profiles.id`; every protected request resolves that profile from PostgreSQL, so role and active-account checks are current.
 
 Protected requests must include:
 
@@ -146,7 +147,19 @@ Roles are:
 | `admin` | Customer access plus all `/api/admin/*` endpoints. |
 | `super_admin` | Same administrative endpoint access as `admin`. |
 
-Token sign-up, sign-in, password recovery, and OAuth flows are provided by Supabase Auth. The backend route currently exposed for authentication is `GET /api/auth/me`.
+`POST /api/auth/register` creates a customer account and returns an access token. `POST /api/auth/login` returns an access token for an existing account. `GET /api/auth/me` returns the authenticated profile. Registrations always receive the `customer` role; provision the first administrator directly in PostgreSQL through an approved operational process. Password-reset, refresh-token, email-verification, and Cloudinary upload flows are not implemented in this backend.
+
+### Google OAuth setup
+
+Google Sign-In is an additional authentication method; email/password registration and login continue to work unchanged. Start the browser flow at `GET /api/auth/google`. Google redirects to `GET /api/auth/google/callback`, which returns the same JWT session response as `POST /api/auth/login`. The frontend must retain that Bearer token in the same way it handles an email/password login. There is no server-side application session to revoke: logout means the client discards its JWT.
+
+1. In [Google Cloud Console](https://console.cloud.google.com/), create or select a project, configure the OAuth consent screen, then create an **OAuth 2.0 Client ID** for a **Web application**.
+2. Copy its client ID and client secret to `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`; never commit either value.
+3. Add the exact `GOOGLE_OAUTH_REDIRECT_URI` to that client’s **Authorized redirect URIs**. Google requires an exact match, including protocol, host, port, path, and trailing slash behavior. For local development use `http://localhost:5001/api/auth/google/callback`. For Pxxl use the public HTTPS API URL, for example `https://api.example.com/api/auth/google/callback`.
+4. Generate a separate high-entropy value for `GOOGLE_OAUTH_STATE_SECRET`. The backend uses it only to sign a ten-minute, HTTP-only OAuth state cookie and clears that cookie at the callback.
+5. Apply `016_google_oauth_profiles.sql` once through the Pxxl SQL console or your normal migration process before using Google Sign-In. Do not rerun migrations `001`–`015` on an already-migrated database.
+
+The implementation uses Google’s authorization-code flow with `openid email profile` scopes and accepts only Google accounts whose email is verified. A profile is found by Google subject first, then an existing matching SBS email account is linked; otherwise a new customer profile is created. See Google’s [web-server OAuth guide](https://developers.google.com/identity/protocols/oauth2/web-server) and [OpenID Connect reference](https://developers.google.com/identity/openid-connect/reference) for Cloud configuration details.
 
 ---
 
@@ -166,7 +179,7 @@ To replace the logo, update the `logoUrl` constant in `src/utils/emailBrand.ts`.
 
 # API Documentation
 
-Base URL examples below assume `http://localhost:5000`.
+Base URL examples below assume `http://localhost:5001`.
 
 Authentication labels:
 
@@ -185,7 +198,11 @@ Authentication labels:
 
 | Method | Route | Auth | Purpose / usage |
 | --- | --- | --- | --- |
-| `GET` | `/api/auth/me` | Customer token | Returns the authenticated SBS profile, including role. Use after obtaining a Supabase access token. |
+| `POST` | `/api/auth/register` | Public | Creates a customer account from `email`, `password` (minimum 12 characters), and `fullName`; returns a Bearer access token. |
+| `POST` | `/api/auth/login` | Public | Signs in with `email` and `password`; returns a Bearer access token. |
+| `GET` | `/api/auth/google` | Public | Starts the Google OAuth authorization-code flow. |
+| `GET` | `/api/auth/google/callback` | Public | Validates the OAuth callback and returns the standard Bearer JWT session response. |
+| `GET` | `/api/auth/me` | Customer token | Returns the authenticated SBS profile, including role. |
 
 ## Products
 
@@ -898,9 +915,9 @@ Apply `src/database/migrations/015_addresses_analytics_and_product_views.sql` af
 
 ## Deployment
 
-### Render
+### Pxxl
 
-Configure the Render service with all required environment variables, including `DATABASE_URL`, the Supabase values, OAuth values, Cloudinary values, `FRONTEND_URL`, `RESEND_API_KEY`, and `NOTIFICATION_EMAIL`.
+Deploy the compiled Node.js service to Pxxl and configure the documented runtime variables there. Pxxl provides the managed PostgreSQL database through `DATABASE_URL`; this backend has no external identity-service dependency.
 
 | Setting | Value |
 | --- | --- |
@@ -910,4 +927,4 @@ Configure the Render service with all required environment variables, including 
 
 Set `NODE_ENV=production`. The server uses SSL for PostgreSQL connections in production.
 
-After deployment, use the configured Render URL as the API base URL and set `FRONTEND_URL` to the deployed frontend origin for CORS.
+After deployment, use the configured Pxxl URL as the API base URL and set `FRONTEND_URL`, `ADMIN_URL`, and `LIVE_URL` to the allowed frontend origins for CORS.

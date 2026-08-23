@@ -17,8 +17,7 @@ export type ApiResponse<T = unknown> = ApiSuccess<T> | ApiError;
 // ─── Auth Types ──────────────────────────────────────────────────────────────
 
 export interface AuthUser {
-  id: string;           // profiles.id
-  authUserId: string;   // profiles.auth_user_id (Supabase auth.users.id)
+  id: string;           // profiles.id and JWT subject
   email: string;
   fullName: string;
   phone: string | null;

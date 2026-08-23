@@ -1,11 +1,11 @@
 import { pool } from '../database/pool.js';
 import type { AuthUser } from '../types/api.types.js';
 
-// Maps a raw database row to the AuthUser shape used throughout the application.
+type ProfileCredentials = AuthUser & { passwordHash: string | null };
+
 function rowToAuthUser(row: Record<string, unknown>): AuthUser {
   return {
     id: row['id'] as string,
-    authUserId: row['auth_user_id'] as string,
     email: row['email'] as string,
     fullName: row['full_name'] as string,
     phone: (row['phone'] as string | null) ?? null,
@@ -15,45 +15,64 @@ function rowToAuthUser(row: Record<string, unknown>): AuthUser {
   };
 }
 
-export async function findProfileByAuthUserId(
-  authUserId: string,
-): Promise<AuthUser | null> {
-  const result = await pool.query(
-    `SELECT p.id, p.auth_user_id, u.email, p.full_name, p.phone,
-            p.avatar_url, p.role, p.is_active
-     FROM profiles p
-     JOIN auth.users u ON u.id = p.auth_user_id
-     WHERE p.auth_user_id = $1
-       AND p.is_active = true`,
-    [authUserId],
-  );
+const profileFields = 'id, email, full_name, phone, avatar_url, role, is_active';
 
+export async function findProfileById(id: string): Promise<AuthUser | null> {
+  const result = await pool.query(`SELECT ${profileFields} FROM profiles WHERE id = $1`, [id]);
+  if (result.rows.length === 0) return null;
+  return rowToAuthUser(result.rows[0] as Record<string, unknown>);
+}
+
+export async function findProfileCredentialsByEmail(email: string): Promise<ProfileCredentials | null> {
+  const result = await pool.query(
+    `SELECT ${profileFields}, password_hash FROM profiles WHERE lower(email) = lower($1)`,
+    [email],
+  );
+  if (result.rows.length === 0) return null;
+  const row = result.rows[0] as Record<string, unknown>;
+  return { ...rowToAuthUser(row), passwordHash: (row['password_hash'] as string | null) ?? null };
+}
+
+export async function findProfileByGoogleSubject(googleSubject: string): Promise<AuthUser | null> {
+  const result = await pool.query(
+    `SELECT ${profileFields} FROM profiles WHERE google_subject = $1`,
+    [googleSubject],
+  );
   if (result.rows.length === 0) return null;
   return rowToAuthUser(result.rows[0] as Record<string, unknown>);
 }
 
 export async function createProfile(data: {
-  authUserId: string;
+  email: string;
+  passwordHash: string | null;
   fullName: string;
   avatarUrl?: string | null;
+  googleSubject?: string | null;
 }): Promise<AuthUser> {
   const result = await pool.query(
-    `INSERT INTO profiles (auth_user_id, full_name, avatar_url)
-     VALUES ($1, $2, $3)
-     RETURNING id, auth_user_id, full_name, phone, avatar_url, role, is_active`,
-    [data.authUserId, data.fullName, data.avatarUrl ?? null],
+    `INSERT INTO profiles (email, password_hash, full_name, avatar_url, google_subject)
+     VALUES (lower($1), $2, $3, $4, $5)
+     RETURNING ${profileFields}`,
+    [data.email, data.passwordHash, data.fullName, data.avatarUrl ?? null, data.googleSubject ?? null],
   );
+  return rowToAuthUser(result.rows[0] as Record<string, unknown>);
+}
 
-  // Fetch with email join so the returned shape is complete
-  const created = result.rows[0] as Record<string, unknown>;
-  const profile = await findProfileByAuthUserId(created['auth_user_id'] as string);
-
-  if (!profile) throw new Error('Profile created but could not be retrieved');
-  return profile;
+export async function linkGoogleSubject(profileId: string, googleSubject: string): Promise<AuthUser | null> {
+  const result = await pool.query(
+    `UPDATE profiles
+     SET google_subject = $1
+     WHERE id = $2
+       AND (google_subject IS NULL OR google_subject = $1)
+     RETURNING ${profileFields}`,
+    [googleSubject, profileId],
+  );
+  if (result.rows.length === 0) return null;
+  return rowToAuthUser(result.rows[0] as Record<string, unknown>);
 }
 
 export async function updateProfile(
-  authUserId: string,
+  profileId: string,
   data: Partial<{ fullName: string; phone: string; avatarUrl: string }>,
 ): Promise<AuthUser | null> {
   const fields: string[] = [];
@@ -72,15 +91,13 @@ export async function updateProfile(
     fields.push(`avatar_url = $${idx++}`);
     values.push(data.avatarUrl);
   }
+  if (fields.length === 0) return findProfileById(profileId);
 
-  if (fields.length === 0) return findProfileByAuthUserId(authUserId);
-
-  values.push(authUserId);
-
-  await pool.query(
-    `UPDATE profiles SET ${fields.join(', ')} WHERE auth_user_id = $${idx}`,
+  values.push(profileId);
+  const result = await pool.query(
+    `UPDATE profiles SET ${fields.join(', ')} WHERE id = $${idx} RETURNING ${profileFields}`,
     values,
   );
-
-  return findProfileByAuthUserId(authUserId);
+  if (result.rows.length === 0) return null;
+  return rowToAuthUser(result.rows[0] as Record<string, unknown>);
 }

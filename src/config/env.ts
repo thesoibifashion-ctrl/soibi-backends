@@ -12,19 +12,13 @@ export const env = {
 
   databaseUrl: requireEnv('DATABASE_URL'),
 
-  supabaseUrl: requireEnv('SUPABASE_URL'),
-  supabaseAnonKey: requireEnv('SUPABASE_ANON_KEY'),
-  supabaseServiceRoleKey: requireEnv('SUPABASE_SERVICE_ROLE_KEY'),
-
   jwtSecret: requireEnv('JWT_SECRET'),
   jwtExpiresIn: process.env['JWT_EXPIRES_IN'] ?? '7d',
 
   googleClientId: requireEnv('GOOGLE_CLIENT_ID'),
   googleClientSecret: requireEnv('GOOGLE_CLIENT_SECRET'),
-
-  cloudinaryCloudName: requireEnv('CLOUDINARY_CLOUD_NAME'),
-  cloudinaryApiKey: requireEnv('CLOUDINARY_API_KEY'),
-  cloudinaryApiSecret: requireEnv('CLOUDINARY_API_SECRET'),
+  googleOAuthRedirectUri: requireEnv('GOOGLE_OAUTH_REDIRECT_URI'),
+  googleOAuthStateSecret: requireEnv('GOOGLE_OAUTH_STATE_SECRET'),
 
   frontendUrl: requireEnv('FRONTEND_URL'),
   adminUrl: requireEnv('ADMIN_URL'),
