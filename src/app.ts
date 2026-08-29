@@ -34,6 +34,9 @@ import adminSettingsRoutes from './routes/admin-settings.routes.js';
 import adminCartRoutes from './routes/admin-cart.routes.js';
 import trackingRoutes from './routes/tracking.routes.js';
 import adminAnalyticsRoutes from './routes/admin-analytics.routes.js';
+import adminMeasurementRoutes from './routes/admin-measurement.routes.js';
+import currencyRoutes from './routes/currency.routes.js';
+import adminCurrencyRoutes from './routes/admin-currency.routes.js';
 const app = express();
 
 // ─── Security ─────────────────────────────────────────────────────────────────
@@ -57,11 +60,14 @@ app.use('/api/products', productRoutes);
 app.use('/api/collections', collectionRoutes);
 app.use('/api/materials', materialRoutes);
 app.use('/api/colors', colorRoutes);
+app.use('/api/currencies', currencyRoutes);
 app.use('/api/quotes', quoteRoutes);
 app.use('/api/admin/quotes', adminQuoteRoutes);
 app.use('/api/contact', contactRoutes);
 app.use('/api/academy', academyRoutes);
 app.use('/api/admin/products', adminProductRoutes);
+app.use('/api/admin/currencies', adminCurrencyRoutes);
+app.use('/api/admin/measurements', adminMeasurementRoutes);
 app.use('/api/admin/collections', adminCollectionRoutes);
 app.use('/api/admin/contact', adminContactRoutes);
 app.use('/api/admin/academy', adminAcademyRoutes);

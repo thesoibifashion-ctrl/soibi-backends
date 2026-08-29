@@ -25,8 +25,7 @@ All API responses use a consistent JSON envelope with `success`, `message`, and 
 - Public product, collection, material, color, carousel, and customization catalog APIs
 - Admin product management, images, variants, and collection assignments
 - Public gallery with admin gallery management
-- Guest and authenticated quote submission with contact preference and email notifications
-- Contact submissions and admin review
+- Guest andz authenticated quote submission with contact preference and email notifications - Contact submissions and admin review
 - SBS Academy registrations and admin review
 - Authenticated customer carts with price snapshots, submission lifecycle, and cart history
 - Authenticated product favorites
@@ -914,6 +913,120 @@ Content-Type: application/json
 Apply `src/database/migrations/015_addresses_analytics_and_product_views.sql` after migrations 001–014. It adds only nullable address/payment columns and the daily product-view aggregate table; no new environment variables are required.
 
 ## Deployment
+
+## Multi-currency product pricing
+
+Migration `018_a_and_product_prices.sql` adds an admin-managed `currencies` catalogue and a `product_prices` relationship. A currency has `id`, three-letter uppercase `code`, `name`, `symbol`, `isDefault`, and `isActive`. The database permits at most one default currency and prevents duplicate product/currency assignments.
+
+Prices are manually maintained by admins. `basePrice` and existing variant `priceAdjustment` fields are unchanged for backward compatibility. Currency prices are independent, stored amounts; this backend has no exchange-rate API and never performs automatic conversion. The frontend must likewise only select a stored product price, never calculate one.
+
+Active currencies are available to storefront clients at `GET /api/currencies`. Admin currency management requires an admin or super-admin bearer token:
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/admin/currencies` | List active and inactive currencies. |
+| `POST` | `/api/admin/currencies` | Create a currency. |
+| `PATCH` | `/api/admin/currencies/:id` | Edit code, name, symbol, or active state. |
+| `PATCH` | `/api/admin/currencies/:id/default` | Make a currency the default (and active). |
+| `DELETE` | `/api/admin/currencies/:id` | Deactivate a non-default currency without removing pricing history. |
+
+Set another default before deactivating or deleting the current default. Currency codes and symbols are supplied by the admin—none are hardcoded by the API.
+
+Product creation and update accept an optional `prices` list. When supplied on an update it transactionally replaces that product's currency-specific prices; every referenced currency must be active, and duplicate `currencyId` values are rejected.
+
+```json
+{
+  "name": "Classic Shirt",
+  "basePrice": 85000,
+  "prices": [
+    { "currencyId": "00000000-0000-0000-0000-000000000001", "amount": 85000 },
+    { "currencyId": "00000000-0000-0000-0000-000000000002", "amount": 55 }
+  ]
+}
+```
+
+Dedicated admin product-price endpoints are also available:
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/admin/products/:id/prices` | List a product's stored prices. |
+| `PUT` | `/api/admin/products/:id/prices` | Transactionally replace prices with `{ "prices": [...] }`. |
+| `POST` | `/api/admin/products/:id/prices` | Add or upsert `{ "currencyId", "amount" }`. |
+| `PATCH` | `/api/admin/products/:id/prices/:currencyId` | Change the stored amount with `{ "amount" }`. |
+| `DELETE` | `/api/admin/products/:id/prices/:currencyId` | Remove that stored price. |
+
+Public product responses, including product lists, featured products, collection products, and favorites, include active manually stored prices with the currency details needed for selection:
+
+```json
+{
+  "basePrice": 85000,
+  "prices": [
+    {
+      "currencyId": "00000000-0000-0000-0000-000000000001",
+      "currency": "NGN",
+      "name": "Nigerian Naira",
+      "symbol": "₦",
+      "amount": 85000
+    }
+  ]
+}
+```
+
+If a product has no stored price for the currency selected by a client, its `prices` array simply has no matching `currencyId`; the client must treat that currency as unavailable for that product. The API does not fall back to, derive, or convert another price. The default currency identifies the admin-selected primary currency, but does not create missing product prices or alter `basePrice`.
+
+## Reusable product measurements
+
+Migration `017_measurements.sql` adds a reusable `measurements` catalogue and the `product_measurements` assignment table. A measurement definition stores its title and one Cloudinary instructional `image_url`; `product_measurements` stores the product-specific `value` and `sort_order`. This keeps a guide such as **Chest** reusable across products while allowing each product to have its own value. A unique `(product_id, measurement_id)` constraint prevents duplicate assignments, and foreign keys clean assignments when either the product or definition is deleted.
+
+Measurement management requires an existing admin or super-admin bearer token:
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/admin/measurements` | List reusable measurement definitions. |
+| `POST` | `/api/admin/measurements` | Create a definition. |
+| `PATCH` | `/api/admin/measurements/:id` | Update its title and/or image URL. |
+| `DELETE` | `/api/admin/measurements/:id` | Delete a definition and its assignments. |
+| `GET` | `/api/admin/products/:productId/measurements` | List a product's assignments in sort order. |
+| `POST` | `/api/admin/products/:productId/measurements` | Assign an existing definition. |
+| `PATCH` | `/api/admin/products/:productId/measurements/:measurementId` | Update the assignment value and/or sort order. |
+| `DELETE` | `/api/admin/products/:productId/measurements/:measurementId` | Remove the assignment. |
+
+The frontend uploads instructional images to Cloudinary. This API does not upload files; it only accepts and stores the returned URL:
+
+```json
+{ "title": "Chest", "imageUrl": "https://res.cloudinary.com/example/image/upload/chest-guide.jpg" }
+```
+
+Products may also receive assignments in the existing admin create or update payload. Supplying `measurements` replaces that product's assignments transactionally, following the same pattern as its nested colors, materials, and sizes:
+
+```json
+{
+  "name": "Classic Shirt",
+  "measurements": [
+    { "measurementId": "00000000-0000-0000-0000-000000000001", "value": "42 inches", "sortOrder": 0 },
+    { "measurementId": "00000000-0000-0000-0000-000000000002", "value": "36 inches", "sortOrder": 1 }
+  ]
+}
+```
+
+Public product responses and existing admin product responses now include an ordered `measurements` array when applicable (or `[]`):
+
+```json
+{
+  "measurements": [
+    {
+      "id": "assignment-id",
+      "measurementId": "measurement-id",
+      "title": "Chest",
+      "value": "42 inches",
+      "imageUrl": "https://res.cloudinary.com/example/image/upload/chest-guide.jpg",
+      "sortOrder": 0
+    }
+  ]
+}
+```
+
+Measurements are display guidance only and are separate from variants. Existing variants continue to represent selectable size, color, SKU, availability, and price-adjustment data.
 
 ### Pxxl
 

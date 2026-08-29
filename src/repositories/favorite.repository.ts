@@ -16,6 +16,12 @@ function parseImages(value: unknown): Favorite['product']['images'] {
   return [];
 }
 
+function parsePrices(value: unknown): Favorite['product']['prices'] {
+  if (Array.isArray(value)) return value.map((price) => ({ currencyId: price['currency_id'] as string, currency: price['currency'] as string, name: price['name'] as string, symbol: price['symbol'] as string, amount: parseFloat(price['amount'] as string) }));
+  if (typeof value === 'string') return parsePrices(JSON.parse(value) as unknown);
+  return [];
+}
+
 function rowToFavorite(row: Record<string, unknown>): Favorite {
   return {
     id: row['id'] as string,
@@ -39,6 +45,7 @@ function rowToFavorite(row: Record<string, unknown>): Favorite {
       collections: [],
       materials: [],
       colors: [],
+      prices: parsePrices(row['prices']),
     },
   };
 }
@@ -55,6 +62,9 @@ export async function findFavoritesByProfileId(profileId: string): Promise<Favor
               ) ORDER BY pi.sort_order ASC) FILTER (WHERE pi.id IS NOT NULL),
               '[]'
             ) AS images
+            ,COALESCE((SELECT json_agg(jsonb_build_object('currency_id', c.id, 'currency', c.code, 'name', c.name, 'symbol', c.symbol, 'amount', pp.amount) ORDER BY c.is_default DESC, c.code ASC)
+                       FROM product_prices pp JOIN currencies c ON c.id = pp.currency_id
+                       WHERE pp.product_id = p.id AND c.is_active = true), '[]') AS prices
      FROM favorites f
      JOIN products p ON p.id = f.product_id
      LEFT JOIN product_images pi ON pi.product_id = p.id

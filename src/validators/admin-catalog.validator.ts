@@ -26,6 +26,15 @@ const productFields = {
     name: z.string().trim().min(1, 'material name is required').max(255),
   })).max(100).optional(),
   sizes: z.array(z.number().min(0).max(999.99)).max(100).optional(),
+  measurements: z.array(z.object({
+    measurementId: z.string().uuid('measurementId must be a valid UUID'),
+    value: z.string().trim().min(1, 'measurement value is required').max(1_000),
+    sortOrder: z.number().int().min(0).optional(),
+  })).max(100).optional(),
+  prices: z.array(z.object({
+    currencyId: z.string().uuid('currencyId must be a valid UUID'),
+    amount: z.number().min(0, 'price amount must be >= 0').max(99_999_999_999.99),
+  })).max(100).optional(),
 };
 
 type ProductFieldsInput = z.infer<z.ZodObject<typeof productFields>>;
@@ -40,7 +49,30 @@ function validateProductDuplicates(data: ProductFieldsInput, ctx: z.RefinementCt
   if (data.sizes && new Set(data.sizes).size !== data.sizes.length) {
     ctx.addIssue({ code: 'custom', message: 'sizes must not contain duplicate values', path: ['sizes'] });
   }
+  if (data.measurements && new Set(data.measurements.map((m) => m.measurementId)).size !== data.measurements.length) {
+    ctx.addIssue({ code: 'custom', message: 'measurements must not contain duplicate measurementId values', path: ['measurements'] });
+  }
+  if (data.prices && new Set(data.prices.map((price) => price.currencyId)).size !== data.prices.length) {
+    ctx.addIssue({ code: 'custom', message: 'prices must not contain duplicate currencyId values', path: ['prices'] });
+  }
 }
+
+export const replaceProductPricesSchema = z.object({
+  prices: productFields.prices.unwrap(),
+}).superRefine((data, ctx) => {
+  if (new Set(data.prices.map((price) => price.currencyId)).size !== data.prices.length) {
+    ctx.addIssue({ code: 'custom', message: 'prices must not contain duplicate currencyId values', path: ['prices'] });
+  }
+});
+
+export const createProductPriceSchema = z.object({
+  currencyId: z.string().uuid('currencyId must be a valid UUID'),
+  amount: z.number().min(0, 'amount must be >= 0').max(99_999_999_999.99),
+});
+
+export const updateProductPriceSchema = z.object({
+  amount: z.number().min(0, 'amount must be >= 0').max(99_999_999_999.99),
+});
 
 export const createProductSchema = z.object(productFields).superRefine(validateProductDuplicates);
 

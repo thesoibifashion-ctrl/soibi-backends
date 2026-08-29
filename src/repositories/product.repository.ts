@@ -1,5 +1,6 @@
 import { pool } from '../database/pool.js';
 import type { PoolClient } from 'pg';
+import { AppError } from '../utils/AppError.js';
 import type {
   Product,
   ProductSummary,
@@ -8,6 +9,8 @@ import type {
   MaterialRef,
   ColorRef,
   ProductVariant,
+  ProductMeasurement,
+  ProductPrice,
 } from '../types/catalog.types.js';
 import type {
   AdminProduct,
@@ -21,6 +24,7 @@ import type {
   UpdateProductInput,
   UpdateProductVariantInput,
 } from '../types/admin-catalog.types.js';
+import type { ProductPriceInput } from '../types/currency.types.js';
 
 export interface ProductFilter {
   color?: string;
@@ -50,6 +54,8 @@ function rowToProductSummary(row: Record<string, unknown>): ProductSummary {
   const materials = parseJsonAgg<MaterialRef>(row['materials']);
   const colors = parseJsonAgg<ColorRef>(row['colors']);
   const sizes = parseJsonAgg<number | string>(row['sizes']).map((size) => Number(size));
+  const measurements = parseJsonAgg<Record<string, unknown>>(row['measurements']);
+  const prices = parseJsonAgg<Record<string, unknown>>(row['prices']);
 
   return {
     id: row['id'] as string,
@@ -90,6 +96,19 @@ function rowToProductSummary(row: Record<string, unknown>): ProductSummary {
       hex: (col['hex_code' as keyof typeof col] as unknown as string | null) ?? null,
     })),
     sizes,
+    measurements: measurements.map((measurement): ProductMeasurement => ({
+      id: measurement['id'] as string,
+      measurementId: measurement['measurement_id'] as string,
+      title: measurement['title'] as string,
+      value: measurement['value'] as string,
+      imageUrl: measurement['image_url'] as string,
+      sortOrder: measurement['sort_order'] as number,
+    })),
+    prices: prices.map((price): ProductPrice => ({
+      currencyId: price['currency_id'] as string, currency: price['currency'] as string,
+      name: price['name'] as string, symbol: price['symbol'] as string,
+      amount: parseFloat(price['amount'] as string),
+    })),
   };
 }
 
@@ -159,6 +178,28 @@ const PRODUCT_AGGREGATES = `
     )) FILTER (WHERE col.id IS NOT NULL),
     '[]'
   ) AS colors,
+
+  COALESCE(
+    (SELECT json_agg(jsonb_build_object(
+      'id', pm.id, 'measurement_id', pm.measurement_id, 'title', measurement.title,
+      'value', pm.value, 'image_url', measurement.image_url, 'sort_order', pm.sort_order
+    ) ORDER BY pm.sort_order ASC, pm.id ASC)
+     FROM product_measurements pm
+     JOIN measurements measurement ON measurement.id = pm.measurement_id
+     WHERE pm.product_id = p.id),
+    '[]'
+  ) AS measurements,
+
+  COALESCE(
+    (SELECT json_agg(jsonb_build_object(
+      'currency_id', currency.id, 'currency', currency.code, 'name', currency.name,
+      'symbol', currency.symbol, 'amount', product_price.amount
+    ) ORDER BY currency.is_default DESC, currency.code ASC)
+     FROM product_prices product_price
+     JOIN currencies currency ON currency.id = product_price.currency_id
+     WHERE product_price.product_id = p.id AND currency.is_active = true),
+    '[]'
+  ) AS prices,
 
   COALESCE(
     (SELECT json_agg(s.value ORDER BY s.value)
@@ -349,6 +390,8 @@ function rowToAdminProductCatalogue(row: Record<string, unknown>): AdminProductC
   const materials = parseJsonAgg<Record<string, unknown>>(row['materials']);
   const colors = parseJsonAgg<Record<string, unknown>>(row['colors']);
   const sizes = parseJsonAgg<number | string>(row['sizes']).map(Number);
+  const measurements = parseJsonAgg<Record<string, unknown>>(row['measurements']);
+  const prices = parseJsonAgg<Record<string, unknown>>(row['prices']);
   return {
     ...rowToAdminProduct(row),
     images: images.map((image) => ({
@@ -376,10 +419,21 @@ function rowToAdminProductCatalogue(row: Record<string, unknown>): AdminProductC
       hex: (color['hex_code'] as string | null) ?? null,
     })),
     sizes,
+    measurements: measurements.map((measurement) => ({
+      id: measurement['id'] as string,
+      measurementId: measurement['measurement_id'] as string,
+      title: measurement['title'] as string,
+      value: measurement['value'] as string,
+      imageUrl: measurement['image_url'] as string,
+      sortOrder: measurement['sort_order'] as number,
+    })),
+    prices: prices.map((price) => ({ currencyId: price['currency_id'] as string, currency: price['currency'] as string, name: price['name'] as string, symbol: price['symbol'] as string, amount: parseFloat(price['amount'] as string) })),
   };
 }
 
-const ADMIN_PRODUCT_AGGREGATES = PRODUCT_AGGREGATES.replace('AND s.is_active = true', '');
+const ADMIN_PRODUCT_AGGREGATES = PRODUCT_AGGREGATES
+  .replace('AND s.is_active = true', '')
+  .replace('AND currency.is_active = true', '');
 const ADMIN_PRODUCT_JOINS = `
   LEFT JOIN product_images pi        ON pi.product_id = p.id
   LEFT JOIN product_collections pc   ON pc.product_id = p.id
@@ -406,7 +460,7 @@ export async function findAllProductsForAdmin(): Promise<AdminProductCatalogueIt
   return (result.rows as Record<string, unknown>[]).map(rowToAdminProductCatalogue);
 }
 
-async function getProductOptions(client: PoolClient, productId: string): Promise<Pick<AdminProductDetails, 'colors' | 'materials' | 'sizes'>> {
+async function getProductOptions(client: PoolClient, productId: string): Promise<Pick<AdminProductDetails, 'colors' | 'materials' | 'sizes' | 'measurements' | 'prices'>> {
   const result = await client.query(
     `SELECT
        COALESCE((SELECT json_agg(jsonb_build_object('id', c.id, 'name', c.name, 'hex_code', c.hex_code) ORDER BY c.name)
@@ -417,7 +471,16 @@ async function getProductOptions(client: PoolClient, productId: string): Promise
                  WHERE pm.product_id = $1 AND m.is_active = true), '[]') AS materials,
        COALESCE((SELECT json_agg(s.value ORDER BY s.value)
                  FROM product_sizes ps JOIN sizes s ON s.id = ps.size_id
-                 WHERE ps.product_id = $1 AND s.is_active = true), '[]') AS sizes`,
+                 WHERE ps.product_id = $1 AND s.is_active = true), '[]') AS sizes,
+       COALESCE((SELECT json_agg(jsonb_build_object(
+                   'id', pm.id, 'measurement_id', pm.measurement_id, 'title', measurement.title,
+                   'value', pm.value, 'image_url', measurement.image_url, 'sort_order', pm.sort_order
+                 ) ORDER BY pm.sort_order ASC, pm.id ASC)
+                 FROM product_measurements pm JOIN measurements measurement ON measurement.id = pm.measurement_id
+                 WHERE pm.product_id = $1), '[]') AS measurements,
+       COALESCE((SELECT json_agg(jsonb_build_object('currency_id', currency.id, 'currency', currency.code, 'name', currency.name, 'symbol', currency.symbol, 'amount', product_price.amount) ORDER BY currency.is_default DESC, currency.code ASC)
+                 FROM product_prices product_price JOIN currencies currency ON currency.id = product_price.currency_id
+                 WHERE product_price.product_id = $1), '[]') AS prices`,
     [productId],
   );
   const row = result.rows[0] as Record<string, unknown>;
@@ -432,13 +495,22 @@ async function getProductOptions(client: PoolClient, productId: string): Promise
     name: material['name' as keyof typeof material] as unknown as string,
     slug: material['slug' as keyof typeof material] as unknown as string,
   }));
-  return { colors, materials, sizes: parseJsonAgg<number | string>(row['sizes']).map(Number) };
+  const measurements = parseJsonAgg<Record<string, unknown>>(row['measurements']).map((measurement) => ({
+    id: measurement['id'] as string,
+    measurementId: measurement['measurement_id'] as string,
+    title: measurement['title'] as string,
+    value: measurement['value'] as string,
+    imageUrl: measurement['image_url'] as string,
+    sortOrder: measurement['sort_order'] as number,
+  }));
+  const prices = parseJsonAgg<Record<string, unknown>>(row['prices']).map((price) => ({ currencyId: price['currency_id'] as string, currency: price['currency'] as string, name: price['name'] as string, symbol: price['symbol'] as string, amount: parseFloat(price['amount'] as string) }));
+  return { colors, materials, sizes: parseJsonAgg<number | string>(row['sizes']).map(Number), measurements, prices };
 }
 
 async function replaceProductOptions(
   client: PoolClient,
   productId: string,
-  input: Pick<UpdateProductInput, 'colors' | 'materials' | 'sizes'>,
+  input: Pick<UpdateProductInput, 'colors' | 'materials' | 'sizes' | 'measurements'>,
 ): Promise<void> {
   if (input.colors !== undefined) {
     await client.query('DELETE FROM product_colors WHERE product_id = $1', [productId]);
@@ -474,6 +546,25 @@ async function replaceProductOptions(
       await client.query('INSERT INTO product_sizes (product_id, size_id) VALUES ($1, $2)', [productId, (result.rows[0] as Record<string, unknown>)['id']]);
     }
   }
+  if (input.measurements !== undefined) {
+    await client.query('DELETE FROM product_measurements WHERE product_id = $1', [productId]);
+    for (const measurement of input.measurements) {
+      const result = await client.query(
+        `INSERT INTO product_measurements (product_id, measurement_id, value, sort_order)
+         SELECT $1, $2, $3, $4 WHERE EXISTS (SELECT 1 FROM measurements WHERE id = $2)
+         RETURNING id`,
+        [productId, measurement.measurementId, measurement.value, measurement.sortOrder ?? 0],
+      );
+      if (!result.rows.length) throw AppError.badRequest(`Measurement not found: ${measurement.measurementId}`);
+    }
+  }
+}
+
+async function replaceProductPrices(client: PoolClient, productId: string, prices: ProductPriceInput[]): Promise<void> {
+  const activeCurrencies = await client.query('SELECT id FROM currencies WHERE id = ANY($1::uuid[]) AND is_active = true', [prices.map((price) => price.currencyId)]);
+  if (activeCurrencies.rows.length !== prices.length) throw AppError.badRequest('Every product price must reference an active currency');
+  await client.query('DELETE FROM product_prices WHERE product_id = $1', [productId]);
+  for (const price of prices) await client.query('INSERT INTO product_prices (product_id, currency_id, amount) VALUES ($1, $2, $3)', [productId, price.currencyId, price.amount]);
 }
 
 function rowToManagedProductImage(row: Record<string, unknown>): ManagedProductImage {
@@ -517,8 +608,9 @@ export async function createProduct(input: CreateProductInput): Promise<AdminPro
     const productId = product['id'] as string;
 
     await replaceProductOptions(client, productId, {
-      colors: input.colors ?? [], materials: input.materials ?? [], sizes: input.sizes ?? [],
+      colors: input.colors ?? [], materials: input.materials ?? [], sizes: input.sizes ?? [], measurements: input.measurements ?? [],
     });
+    if (input.prices !== undefined) await replaceProductPrices(client, productId, input.prices);
 
     const response = { ...rowToAdminProduct(product), ...(await getProductOptions(client, productId)) };
     await client.query('COMMIT');
@@ -564,6 +656,7 @@ export async function updateProductById(
       );
     if (result.rows.length === 0) { await client.query('ROLLBACK'); return null; }
     await replaceProductOptions(client, id, input);
+    if (input.prices !== undefined) await replaceProductPrices(client, id, input.prices);
     const product = rowToAdminProduct(result.rows[0] as Record<string, unknown>);
     const options = await getProductOptions(client, id);
     await client.query('COMMIT');
@@ -576,9 +669,28 @@ export async function updateProductById(
   }
 }
 
+export async function getProductPricesForAdmin(productId: string): Promise<ProductPrice[] | null> {
+  const exists = await pool.query('SELECT 1 FROM products WHERE id = $1 AND deleted_at IS NULL', [productId]);
+  if (!exists.rows.length) return null;
+  const result = await pool.query(`SELECT pp.currency_id, c.code AS currency, c.name, c.symbol, pp.amount FROM product_prices pp JOIN currencies c ON c.id = pp.currency_id WHERE pp.product_id = $1 ORDER BY c.is_default DESC, c.code ASC`, [productId]);
+  return result.rows.map((row) => ({ currencyId: row.currency_id as string, currency: row.currency as string, name: row.name as string, symbol: row.symbol as string, amount: parseFloat(row.amount as string) }));
+}
+export async function replaceProductPricesById(productId: string, prices: ProductPriceInput[]): Promise<ProductPrice[] | null> {
+  const client = await pool.connect(); try { await client.query('BEGIN'); const exists = await client.query('SELECT 1 FROM products WHERE id = $1 AND deleted_at IS NULL FOR UPDATE', [productId]); if (!exists.rows.length) { await client.query('ROLLBACK'); return null; } await replaceProductPrices(client, productId, prices); const details = await getProductOptions(client, productId); await client.query('COMMIT'); return details.prices; } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
+}
+export async function upsertProductPrice(productId: string, price: ProductPriceInput): Promise<ProductPrice | null> {
+  const client = await pool.connect(); try { await client.query('BEGIN'); const exists = await client.query('SELECT 1 FROM products WHERE id = $1 AND deleted_at IS NULL', [productId]); if (!exists.rows.length) { await client.query('ROLLBACK'); return null; } const currency = await client.query('SELECT id, code, name, symbol FROM currencies WHERE id = $1 AND is_active = true', [price.currencyId]); if (!currency.rows.length) throw AppError.badRequest('Currency not found or inactive'); await client.query('INSERT INTO product_prices (product_id, currency_id, amount) VALUES ($1, $2, $3) ON CONFLICT (product_id, currency_id) DO UPDATE SET amount = EXCLUDED.amount', [productId, price.currencyId, price.amount]); await client.query('COMMIT'); const row = currency.rows[0] as Record<string, unknown>; return { currencyId: row['id'] as string, currency: row['code'] as string, name: row['name'] as string, symbol: row['symbol'] as string, amount: price.amount }; } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
+}
+export async function removeProductPrice(productId: string, currencyId: string): Promise<boolean> { const result = await pool.query('DELETE FROM product_prices WHERE product_id = $1 AND currency_id = $2 RETURNING product_id', [productId, currencyId]); return result.rows.length > 0; }
+
 export async function softDeleteProductById(id: string): Promise<boolean> {
   const result = await pool.query(
-    'UPDATE products SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL RETURNING id',
+    `WITH deleted_product AS (
+       UPDATE products SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL RETURNING id
+     ), removed_measurements AS (
+       DELETE FROM product_measurements WHERE product_id IN (SELECT id FROM deleted_product)
+     )
+     SELECT id FROM deleted_product`,
     [id],
   );
   return result.rows.length > 0;

@@ -1,4 +1,6 @@
 import type { ProductImage } from './catalog.types.js';
+import type { ProductMeasurement, ProductMeasurementInput } from './measurement.types.js';
+import type { ProductPrice, ProductPriceInput } from './currency.types.js';
 
 export type CatalogStatus = 'draft' | 'published' | 'archived';
 
@@ -30,6 +32,8 @@ export interface CreateProductInput {
   colors?: CreateProductColorInput[];
   materials?: CreateProductMaterialInput[];
   sizes?: number[];
+  measurements?: ProductMeasurementInput[];
+  prices?: ProductPriceInput[];
 }
 
 export type UpdateProductInput = CreateProductInput;
@@ -57,6 +61,8 @@ export interface AdminProductDetails extends AdminProduct {
   colors: import('./catalog.types.js').ColorRef[];
   materials: import('./catalog.types.js').MaterialRef[];
   sizes: number[];
+  measurements: ProductMeasurement[];
+  prices: ProductPrice[];
 }
 
 export interface AdminProductCatalogueItem extends AdminProductDetails {

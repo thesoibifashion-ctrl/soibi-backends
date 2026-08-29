@@ -15,6 +15,10 @@ import {
   removeManagedProductFromCollection,
   removeManagedProductVariant,
   updateManagedProductVariant,
+  getManagedProductPrices,
+  replaceManagedProductPrices,
+  addOrUpdateManagedProductPrice,
+  removeManagedProductPrice,
 } from '../services/product.service.js';
 import type { ProductFilter } from '../repositories/product.repository.js';
 import { sendSuccess } from '../utils/response.js';
@@ -27,6 +31,9 @@ import {
   createProductVariantSchema,
   productCollectionAssignmentSchema,
   updateProductVariantSchema,
+  replaceProductPricesSchema,
+  createProductPriceSchema,
+  updateProductPriceSchema,
 } from '../validators/admin-catalog.validator.js';
 
 export async function listProducts(
@@ -264,4 +271,20 @@ export async function deleteAdminProductVariant(
   } catch (err) {
     next(err);
   }
+}
+
+export async function listAdminProductPrices(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try { sendSuccess(res, 'Product prices retrieved', await getManagedProductPrices(req.params['id'] as string)); } catch (err) { next(err); }
+}
+export async function replaceAdminProductPrices(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try { const parsed = replaceProductPricesSchema.safeParse(req.body); if (!parsed.success) throw AppError.badRequest(parsed.error.issues[0]?.message ?? 'Invalid request body'); sendSuccess(res, 'Product prices updated', await replaceManagedProductPrices(req.params['id'] as string, parsed.data.prices)); } catch (err) { next(err); }
+}
+export async function createAdminProductPrice(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try { const parsed = createProductPriceSchema.safeParse(req.body); if (!parsed.success) throw AppError.badRequest(parsed.error.issues[0]?.message ?? 'Invalid request body'); sendSuccess(res, 'Product price saved', await addOrUpdateManagedProductPrice(req.params['id'] as string, parsed.data), HttpStatus.CREATED); } catch (err) { next(err); }
+}
+export async function updateAdminProductPrice(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try { const parsed = updateProductPriceSchema.safeParse(req.body); if (!parsed.success) throw AppError.badRequest(parsed.error.issues[0]?.message ?? 'Invalid request body'); sendSuccess(res, 'Product price updated', await addOrUpdateManagedProductPrice(req.params['id'] as string, { currencyId: req.params['currencyId'] as string, amount: parsed.data.amount })); } catch (err) { next(err); }
+}
+export async function deleteAdminProductPrice(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try { await removeManagedProductPrice(req.params['id'] as string, req.params['currencyId'] as string); sendSuccess(res, 'Product price removed'); } catch (err) { next(err); }
 }

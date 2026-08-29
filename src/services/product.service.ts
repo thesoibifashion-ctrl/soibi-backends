@@ -16,6 +16,10 @@ import {
   deleteProductVariantById,
   type ProductFilter,
   recordProductView,
+  getProductPricesForAdmin,
+  replaceProductPricesById,
+  upsertProductPrice,
+  removeProductPrice,
 } from '../repositories/product.repository.js';
 import { AppError } from '../utils/AppError.js';
 import type { Product, ProductSummary } from '../types/catalog.types.js';
@@ -31,6 +35,7 @@ import type {
   UpdateProductVariantInput,
   UpdateProductInput,
 } from '../types/admin-catalog.types.js';
+import type { ProductPrice, ProductPriceInput } from '../types/currency.types.js';
 
 export async function getAllProducts(filters?: ProductFilter): Promise<ProductSummary[]> {
   return findPublishedProducts(filters);
@@ -159,4 +164,23 @@ export async function removeManagedProductVariant(
 ): Promise<void> {
   const removed = await deleteProductVariantById(productId, variantId);
   if (!removed) throw AppError.notFound('Product variant not found');
+}
+
+export async function getManagedProductPrices(productId: string): Promise<ProductPrice[]> {
+  const prices = await getProductPricesForAdmin(productId);
+  if (!prices) throw AppError.notFound('Product not found');
+  return prices;
+}
+export async function replaceManagedProductPrices(productId: string, prices: ProductPriceInput[]): Promise<ProductPrice[]> {
+  const result = await replaceProductPricesById(productId, prices);
+  if (!result) throw AppError.notFound('Product not found');
+  return result;
+}
+export async function addOrUpdateManagedProductPrice(productId: string, price: ProductPriceInput): Promise<ProductPrice> {
+  const result = await upsertProductPrice(productId, price);
+  if (!result) throw AppError.notFound('Product not found');
+  return result;
+}
+export async function removeManagedProductPrice(productId: string, currencyId: string): Promise<void> {
+  if (!await removeProductPrice(productId, currencyId)) throw AppError.notFound('Product price not found');
 }

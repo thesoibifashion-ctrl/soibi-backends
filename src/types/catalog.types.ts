@@ -39,6 +39,23 @@ export interface ProductVariant {
   color: ColorRef | null;
 }
 
+export interface ProductMeasurement {
+  id: string;
+  measurementId: string;
+  title: string;
+  value: string;
+  imageUrl: string;
+  sortOrder: number;
+}
+
+export interface ProductPrice {
+  currencyId: string;
+  currency: string;
+  name: string;
+  symbol: string;
+  amount: number;
+}
+
 // ─── Product ──────────────────────────────────────────────────────────────────
 
 export interface Product {
@@ -60,6 +77,8 @@ export interface Product {
   materials: MaterialRef[];
   colors: ColorRef[];
   sizes: number[];
+  measurements: ProductMeasurement[];
+  prices: ProductPrice[];
   variants: ProductVariant[];
 }
 
