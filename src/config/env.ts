@@ -11,7 +11,7 @@ export const env = {
   nodeEnv: process.env['NODE_ENV'] ?? 'development',
 
   databaseUrl: requireEnv('DATABASE_URL'),
-
+  databaseSsl: process.env['DATABASE_SSL'] === 'true',
   jwtSecret: requireEnv('JWT_SECRET'),
   jwtExpiresIn: process.env['JWT_EXPIRES_IN'] ?? '7d',
 

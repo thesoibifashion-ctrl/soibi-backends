@@ -137,9 +137,13 @@ export async function addItemToActiveCart(profileId: string, input: AddCartItemI
          AND product_id IS NOT DISTINCT FROM $2
          AND selected_size IS NOT DISTINCT FROM $3
          AND lower(COALESCE(selected_color, '')) = lower(COALESCE($4, ''))
-         AND lower(COALESCE(selected_material, '')) = lower(COALESCE($5, ''))`,
+         AND lower(COALESCE(selected_material, '')) = lower(COALESCE($5, ''))
+         AND custom_measurements IS NOT DISTINCT FROM $6::jsonb`,
       [cartId, input.productId ?? null, input.selectedSize ?? null,
-       input.selectedColor ?? null, input.selectedMaterial ?? null],
+       input.selectedColor ?? null, input.selectedMaterial ?? null,
+       input.customMeasurements === undefined || input.customMeasurements === null
+         ? null
+         : JSON.stringify(input.customMeasurements)],
     );
 
     if (dupResult.rows.length > 0) {
@@ -157,7 +161,10 @@ export async function addItemToActiveCart(profileId: string, input: AddCartItemI
          input.colorId ?? null, input.sizeId ?? null, input.productNameSnapshot ?? null,
          input.imageUrlSnapshot ?? null, input.quantity, input.selectedSize ?? null,
          input.selectedColor ?? null, input.selectedMaterial ?? null, input.variantLabelSnapshot ?? null,
-         input.customMeasurements ? JSON.stringify(input.customMeasurements) : null, input.customNotes ?? null, input.unitPriceSnapshot],
+         input.customMeasurements === undefined || input.customMeasurements === null
+           ? null
+           : JSON.stringify(input.customMeasurements),
+         input.customNotes ?? null, input.unitPriceSnapshot],
       );
     }
 

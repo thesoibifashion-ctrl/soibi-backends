@@ -622,7 +622,7 @@ The email is fire-and-forget. If it fails, the quote submission is unaffected.
 
 ## Cart
 
-Cart endpoints are authenticated-only. Each authenticated profile has one active cart at a time. Cart items store complete snapshots of the product name, image, price, size, color, and material at the time of adding — the cart display never depends on live product data. When the same product and option combination is added again, the quantity increases instead of creating a duplicate row.
+Cart endpoints are authenticated-only. Each authenticated profile has one active cart at a time. Cart items store complete snapshots of the product name, image, price, size, color, material, and optional custom measurements at the time of adding — the cart display never depends on live product data. When the same product and configuration combination is added again, the quantity increases instead of creating a duplicate row.
 
 ### Cart status lifecycle
 
@@ -642,6 +642,7 @@ Each `cart_items` row stores the complete state of the item at the time it was a
 - `image_url_snapshot` — the product image URL at time of adding
 - `unit_price_snapshot` — the price at time of adding
 - `selected_color`, `selected_material`, `selected_size` — the customer's chosen options
+- `custom_measurements` — an optional JSONB object of product-defined measurement values
 
 These snapshots are the source of truth for displaying the cart. If a product is later renamed, repriced, or deleted, the cart item still shows what the customer originally selected. `product_id` is nullable to support fully custom items with no catalogue record.
 
@@ -670,11 +671,15 @@ The frontend sends the complete item snapshot. The backend does not look up prod
   "selectedSize": 42,
   "selectedColor": "Brown",
   "selectedMaterial": "Full Grain Leather",
-  "unitPriceSnapshot": 85000
+  "unitPriceSnapshot": 85000,
+  "customMeasurements": {
+    "footLength": "10.5",
+    "footWidth": "4.2"
+  }
 }
 ```
 
-`productId` is optional and nullable. All snapshot fields except `quantity` and `unitPriceSnapshot` are optional. Duplicate detection matches on `productId`, `selectedSize`, `selectedColor`, and `selectedMaterial`; a match increases quantity instead of inserting a new row.
+`productId` is optional and nullable. All snapshot fields except `quantity` and `unitPriceSnapshot` are optional. `customMeasurements` accepts a dynamic JSON object or `null`; its keys are not hard-coded. Duplicate detection matches on `productId`, `selectedSize`, `selectedColor`, `selectedMaterial`, and `customMeasurements`; a match increases quantity instead of inserting a new row.
 
 ### Update a cart item
 
@@ -685,9 +690,15 @@ At least one field must be provided.
   "quantity": 2,
   "selectedSize": 43,
   "selectedColor": "Black",
-  "selectedMaterial": "Suede"
+  "selectedMaterial": "Suede",
+  "customMeasurements": {
+    "footLength": "10.7",
+    "footWidth": "4.3"
+  }
 }
 ```
+
+Set `customMeasurements` to `null` to remove saved measurements from an item.
 
 ### Submit the cart
 
