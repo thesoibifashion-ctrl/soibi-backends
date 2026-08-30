@@ -15,4 +15,4 @@ export async function connectDatabase(): Promise<void> {
   } finally {
     client.release();
   }
-}s
+}
