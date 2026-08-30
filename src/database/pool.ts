@@ -11,8 +11,8 @@ export async function connectDatabase(): Promise<void> {
   const client = await pool.connect();
 
   try {
-    console.log("✅ Database connected");
+    console.log("✅ Database connecteds");
   } finally {
     client.release();
   }
-}
+}s
