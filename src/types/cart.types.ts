@@ -19,6 +19,7 @@ export interface CartItem {
   customMeasurements: Record<string, unknown> | null;
   customNotes: string | null;
   unitPriceSnapshot: number;
+  currency: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -53,6 +54,7 @@ export interface CartHistoryItem {
   customMeasurements?: Record<string, unknown> | null;
   customNotes?: string | null;
   unitPriceSnapshot: number;
+  currency: string | null;
 }
 
 export interface CartOrderStatusHistoryEntry {
@@ -69,7 +71,11 @@ export interface CartHistory {
   id: string;
   orderNumber: string | null;
   originalCartId: string | null;
-  profileId: string;
+  profileId: string | null;
+  isGuest: boolean;
+  guestName: string | null;
+  guestEmail: string | null;
+  guestPhone: string | null;
   status: string;
   contactMethod: string | null;
   state: string | null;
@@ -77,6 +83,7 @@ export interface CartHistory {
   address: string | null;
   items: CartHistoryItem[];
   totalSnapshot: number;
+  currency: string | null;
   paymentUrl: string | null;
   receiptUrl: string | null;
   receiptPublicId: string | null;
@@ -111,6 +118,7 @@ export interface AddCartItemInput {
   customMeasurements?: Record<string, unknown> | null;
   customNotes?: string | null;
   unitPriceSnapshot: number;
+  currency: string;
 }
 
 export interface UpdateCartItemInput {
@@ -131,15 +139,25 @@ export interface UpdateCartDetailsInput {
 }
 
 export interface CartSubmitResult {
-  submittedCartId: string;
+  submittedCartId: string | null;
   historyId: string;
   orderNumber: string;
-  newActiveCartId: string;
+  newActiveCartId: string | null;
 }
 
 export interface CartSubmitInput {
   contactMethod: 'email' | 'whatsapp';
   phoneNumber?: string | null;
+  /** Required only when submitting without an authenticated active cart. */
+  items?: AddCartItemInput[];
+  guestName?: string | null;
+  guestEmail?: string | null;
+  guestPhone?: string | null;
+  state?: string | null;
+  city?: string | null;
+  address?: string | null;
+  paymentUrl?: string | null;
+  receiptUrl?: string | null;
 }
 
 export interface UpdateCartOrderStatusInput {

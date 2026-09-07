@@ -15,6 +15,14 @@ export async function findActiveCurrencies(): Promise<Currency[]> {
   const result = await pool.query(`SELECT ${RETURNING} FROM currencies WHERE is_active = true ORDER BY is_default DESC, code ASC`);
   return result.rows.map((row) => rowToCurrency(row as Record<string, unknown>) as Currency);
 }
+export async function findActiveCurrencyCodes(codes: string[]): Promise<string[]> {
+  if (codes.length === 0) return [];
+  const result = await pool.query(
+    'SELECT code FROM currencies WHERE is_active = true AND code = ANY($1::varchar[])',
+    [codes],
+  );
+  return result.rows.map((row) => (row as Record<string, unknown>)['code'] as string);
+}
 export async function findAllCurrencies(): Promise<ManagedCurrency[]> {
   const result = await pool.query(`SELECT ${RETURNING} FROM currencies ORDER BY is_default DESC, code ASC`);
   return result.rows.map((row) => rowToCurrency(row as Record<string, unknown>, true) as ManagedCurrency);

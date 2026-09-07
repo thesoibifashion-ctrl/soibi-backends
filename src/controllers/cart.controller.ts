@@ -6,6 +6,7 @@ import {
   getMyCart,
   getMyCartHistory,
   removeMyCartItem,
+  submitGuestCart,
   submitMyCart,
   updateMyCartItem,
   getAllCartOrdersAdmin,
@@ -14,7 +15,7 @@ import {
   setCartOrderPayment,
   getMyCartHistoryById,
   submitMyCartReceipt,
-  trackMyCartOrderByNumber,
+  trackCartOrderByNumber,
   setCartOrderFulfillment,
   updateMyCartDetails,
 } from '../services/cart.service.js';
@@ -144,12 +145,13 @@ export async function submitCart(
   next: NextFunction,
 ): Promise<void> {
   try {
-    if (!req.user) throw AppError.unauthorized('Not authenticated');
     const parsed = submitCartSchema.safeParse(req.body);
     if (!parsed.success) {
       throw AppError.badRequest(parsed.error.issues[0]?.message ?? 'Invalid request body');
     }
-    const result = await submitMyCart(req.user, parsed.data);
+    const result = req.user
+      ? await submitMyCart(req.user, parsed.data)
+      : await submitGuestCart(parsed.data);
     sendSuccess(res, 'Cart submitted successfully', result);
   } catch (err) {
     next(err);
@@ -201,14 +203,14 @@ export async function updateAdminCartOrderFulfillment(req: MaybeAuthenticatedReq
 
 export async function trackMyCartOrder(req: MaybeAuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
   try {
-    const order = await trackMyCartOrderByNumber(req.params['orderNumber'] as string, resolvedProfileId(req));
+    const order = await trackCartOrderByNumber(req.params['orderNumber'] as string);
     sendSuccess(res, 'Order tracking retrieved', {
       orderNumber: order.orderNumber, orderType: 'cart', status: order.status,
-      statusHistory: (order.statusHistory ?? []).map((entry) => ({ status: entry.newStatus, previousStatus: entry.oldStatus, note: entry.note, createdAt: entry.createdAt })),
-      submittedAt: order.completedAt, createdAt: order.createdAt, items: order.items, total: order.totalSnapshot,
-      paymentUrl: order.paymentUrl, receiptUrl: order.receiptUrl, receiptPublicId: order.receiptPublicId,
-      state: order.state, city: order.city, address: order.address,
-      shippingTrackingNumber: order.shippingTrackingNumber, shippingTrackingUrl: order.shippingTrackingUrl, shippingDetails: order.shippingDetails,
+      statusHistory: (order.statusHistory ?? []).map((entry) => ({ status: entry.newStatus, previousStatus: entry.oldStatus, createdAt: entry.createdAt })),
+      submittedAt: order.completedAt, createdAt: order.createdAt, items: order.items, total: order.totalSnapshot, currency: order.currency,
+      // A tracking number is the public capability token: expose only the order
+      // data needed to track this one order, never contact/address details.
+      shippingTrackingNumber: order.shippingTrackingNumber, shippingTrackingUrl: order.shippingTrackingUrl,
     });
   } catch (err) { next(err); }
 }

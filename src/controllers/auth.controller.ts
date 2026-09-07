@@ -18,7 +18,7 @@ const googleStateCookieOptions = {
   httpOnly: true,
   sameSite: 'lax' as const,
   secure: env.isProduction,
-  maxAge: 10 * 60 * 1000,
+  maxAge: 10 * 60 * 1000, 
   path: '/api/auth/google',
 };
 

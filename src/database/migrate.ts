@@ -8,8 +8,6 @@ const migrationDirectory = join(
   'migrations',
 );
 
-const BASELINE_MIGRATION = '015_addresses_analytics_and_product_views.sql';
-
 async function ensureMigrationTable(): Promise<void> {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -17,35 +15,6 @@ async function ensureMigrationTable(): Promise<void> {
       applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
   `);
-}
-
-async function baselineExistingMigrations(
-  migrationFiles: string[],
-): Promise<void> {
-  const baselineIndex = migrationFiles.indexOf(BASELINE_MIGRATION);
-
-  if (baselineIndex === -1) {
-    return;
-  }
-
-  const existingMigrations = migrationFiles.slice(0, baselineIndex + 1);
-
-  for (const file of existingMigrations) {
-    await pool.query(
-      `
-        INSERT INTO schema_migrations (filename)
-        VALUES ($1)
-        ON CONFLICT (filename) DO NOTHING
-      `,
-      [file],
-    );
-  }
-
-  if (existingMigrations.length > 0) {
-    console.log(
-      `Baselined ${existingMigrations.length} existing migrations through ${BASELINE_MIGRATION}`,
-    );
-  }
 }
 
 async function runMigrations(): Promise<void> {
@@ -58,14 +27,6 @@ async function runMigrations(): Promise<void> {
   }
 
   await ensureMigrationTable();
-
-  /*
-   * The database already contains migrations 001–015, but this project
-   * previously had no migration tracking table.
-   *
-   * Baseline those known migrations so they are never executed again.
-   */
-  await baselineExistingMigrations(migrationFiles);
 
   const client = await pool.connect();
 

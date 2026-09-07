@@ -1,4 +1,5 @@
 import { pool } from '../database/pool.js';
+import type { PoolClient } from 'pg';
 import type {
   AddCartItemInput,
   AdminCartOrder,
@@ -6,10 +7,56 @@ import type {
   CartHistory,
   CartItem,
   CartOrderStatusHistoryEntry,
+  CartHistoryItem,
   UpdateCartItemInput,
   UpdateCartOrderPaymentInput,
   UpdateOrderFulfillmentInput,
 } from '../types/cart.types.js';
+
+type CartHistoryInsert = {
+  originalCartId: string | null;
+  profileId: string | null;
+  isGuest: boolean;
+  guestName: string | null;
+  guestEmail: string | null;
+  guestPhone: string | null;
+  items: CartHistoryItem[];
+  totalSnapshot: number;
+  currency: string | null;
+  contactMethod: 'email' | 'whatsapp';
+  state: string | null;
+  city: string | null;
+  address: string | null;
+  paymentUrl: string | null;
+  receiptUrl: string | null;
+};
+
+/** Shared persistence for authenticated-cart and one-time guest submissions. */
+async function createCartHistory(client: PoolClient, data: CartHistoryInsert): Promise<{ historyId: string; orderNumber: string }> {
+  const year = new Date().getFullYear();
+  await client.query('SELECT pg_advisory_xact_lock($1)', [year + 10000]);
+  const countResult = await client.query(
+    `SELECT COUNT(*) AS total FROM cart_history WHERE EXTRACT(YEAR FROM created_at) = $1`, [year],
+  );
+  const count = parseInt((countResult.rows[0] as Record<string, unknown>)['total'] as string, 10);
+  const orderNumber = `SBS-${year}-C${String(count + 1).padStart(5, '0')}`;
+  const result = await client.query(
+    `INSERT INTO cart_history
+       (original_cart_id, profile_id, is_guest, guest_name, guest_email, guest_phone, items, total_snapshot, currency,
+        contact_method, order_number, status, completed_at, state, city, address, payment_url, receipt_url)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'submitted', now(), $12, $13, $14, $15, $16)
+     RETURNING id`,
+    [data.originalCartId, data.profileId, data.isGuest, data.guestName, data.guestEmail, data.guestPhone,
+     JSON.stringify(data.items), data.totalSnapshot, data.currency, data.contactMethod, orderNumber, data.state, data.city,
+     data.address, data.paymentUrl, data.receiptUrl],
+  );
+  const historyId = (result.rows[0] as Record<string, unknown>)['id'] as string;
+  await client.query(
+    `INSERT INTO cart_order_status_history (cart_history_id, old_status, new_status, changed_by, note)
+     VALUES ($1, NULL, 'submitted', $2, NULL)`, [historyId, data.profileId],
+  );
+  return { historyId, orderNumber };
+}
 
 function rowToCartItem(row: Record<string, unknown>): CartItem {
   return {
@@ -30,6 +77,7 @@ function rowToCartItem(row: Record<string, unknown>): CartItem {
     customMeasurements: (row['custom_measurements'] as Record<string, unknown> | null) ?? null,
     customNotes: (row['custom_notes'] as string | null) ?? null,
     unitPriceSnapshot: parseFloat(row['unit_price_snapshot'] as string),
+    currency: (row['currency'] as string | null) ?? null,
     createdAt: (row['created_at'] as Date).toISOString(),
     updatedAt: (row['updated_at'] as Date).toISOString(),
   };
@@ -56,7 +104,11 @@ function rowToCartHistory(row: Record<string, unknown>): CartHistory {
     id: row['id'] as string,
     orderNumber: (row['order_number'] as string | null) ?? null,
     originalCartId: (row['original_cart_id'] as string | null) ?? null,
-    profileId: row['profile_id'] as string,
+    profileId: (row['profile_id'] as string | null) ?? null,
+    isGuest: (row['is_guest'] as boolean | null) ?? false,
+    guestName: (row['guest_name'] as string | null) ?? null,
+    guestEmail: (row['guest_email'] as string | null) ?? null,
+    guestPhone: (row['guest_phone'] as string | null) ?? null,
     status: (row['status'] as string) ?? 'submitted',
     contactMethod: (row['contact_method'] as string | null) ?? null,
     state: (row['state'] as string | null) ?? null,
@@ -64,6 +116,7 @@ function rowToCartHistory(row: Record<string, unknown>): CartHistory {
     address: (row['address'] as string | null) ?? null,
     items: row['items'] as CartHistory['items'],
     totalSnapshot: parseFloat(row['total_snapshot'] as string),
+    currency: (row['currency'] as string | null) ?? null,
     paymentUrl: (row['payment_url'] as string | null) ?? null,
     receiptUrl: (row['receipt_url'] as string | null) ?? null,
     receiptPublicId: (row['receipt_public_id'] as string | null) ?? null,
@@ -79,7 +132,7 @@ async function fetchCartItems(cartId: string): Promise<CartItem[]> {
   const result = await pool.query(
     `SELECT id, cart_id, product_id, variant_id, material_id, color_id, size_id, product_name_snapshot, image_url_snapshot,
             quantity, selected_size, selected_color, selected_material, variant_label_snapshot, custom_measurements, custom_notes,
-            unit_price_snapshot, created_at, updated_at
+            unit_price_snapshot, currency, created_at, updated_at
      FROM cart_items WHERE cart_id = $1 ORDER BY created_at ASC`,
     [cartId],
   );
@@ -132,18 +185,19 @@ export async function addItemToActiveCart(profileId: string, input: AddCartItemI
     const cartId = cartRow['id'] as string;
 
     const dupResult = await client.query(
-      `SELECT id, quantity FROM cart_items
+      `SELECT id, quantity, currency FROM cart_items
        WHERE cart_id = $1
          AND product_id IS NOT DISTINCT FROM $2
          AND selected_size IS NOT DISTINCT FROM $3
          AND lower(COALESCE(selected_color, '')) = lower(COALESCE($4, ''))
          AND lower(COALESCE(selected_material, '')) = lower(COALESCE($5, ''))
-         AND custom_measurements IS NOT DISTINCT FROM $6::jsonb`,
+         AND custom_measurements IS NOT DISTINCT FROM $6::jsonb
+         AND currency = $7`,
       [cartId, input.productId ?? null, input.selectedSize ?? null,
        input.selectedColor ?? null, input.selectedMaterial ?? null,
        input.customMeasurements === undefined || input.customMeasurements === null
          ? null
-         : JSON.stringify(input.customMeasurements)],
+         : JSON.stringify(input.customMeasurements), input.currency],
     );
 
     if (dupResult.rows.length > 0) {
@@ -155,8 +209,8 @@ export async function addItemToActiveCart(profileId: string, input: AddCartItemI
       await client.query(
         `INSERT INTO cart_items
            (cart_id, product_id, variant_id, material_id, color_id, size_id, product_name_snapshot, image_url_snapshot,
-            quantity, selected_size, selected_color, selected_material, variant_label_snapshot, custom_measurements, custom_notes, unit_price_snapshot)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+            quantity, selected_size, selected_color, selected_material, variant_label_snapshot, custom_measurements, custom_notes, unit_price_snapshot, currency)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
         [cartId, input.productId ?? null, input.variantId ?? null, input.materialId ?? null,
          input.colorId ?? null, input.sizeId ?? null, input.productNameSnapshot ?? null,
          input.imageUrlSnapshot ?? null, input.quantity, input.selectedSize ?? null,
@@ -164,7 +218,7 @@ export async function addItemToActiveCart(profileId: string, input: AddCartItemI
          input.customMeasurements === undefined || input.customMeasurements === null
            ? null
            : JSON.stringify(input.customMeasurements),
-         input.customNotes ?? null, input.unitPriceSnapshot],
+         input.customNotes ?? null, input.unitPriceSnapshot, input.currency],
       );
     }
 
@@ -273,7 +327,7 @@ export async function submitActiveCart(
 
     const itemsResult = await client.query(
       `SELECT product_id, variant_id, material_id, color_id, size_id, product_name_snapshot, image_url_snapshot,
-              quantity, selected_size, selected_color, selected_material, variant_label_snapshot, custom_measurements, custom_notes, unit_price_snapshot
+              quantity, selected_size, selected_color, selected_material, variant_label_snapshot, custom_measurements, custom_notes, unit_price_snapshot, currency
        FROM cart_items WHERE cart_id = $1`,
       [cartId],
     );
@@ -293,37 +347,21 @@ export async function submitActiveCart(
       customMeasurements: (r['custom_measurements'] as Record<string, unknown> | null) ?? null,
       customNotes: (r['custom_notes'] as string | null) ?? null,
       unitPriceSnapshot: parseFloat(r['unit_price_snapshot'] as string),
+      currency: (r['currency'] as string | null) ?? null,
     }));
 
+    const currencies = [...new Set(items.map((item) => item.currency))];
     const totalSnapshot = items.reduce((sum, item) => sum + item.unitPriceSnapshot * item.quantity, 0);
 
-    // Generate order number — lock by year to prevent duplicates
-    const year = new Date().getFullYear();
-    await client.query('SELECT pg_advisory_xact_lock($1)', [year + 10000]); // offset to avoid collision with quote lock
-    const countResult = await client.query(
-      `SELECT COUNT(*) AS total FROM cart_history WHERE EXTRACT(YEAR FROM created_at) = $1`,
-      [year],
-    );
-    const count = parseInt((countResult.rows[0] as Record<string, unknown>)['total'] as string, 10);
-    const orderNumber = `SBS-${year}-C${String(count + 1).padStart(5, '0')}`;
-
-    const historyResult = await client.query(
-      `INSERT INTO cart_history
-         (original_cart_id, profile_id, items, total_snapshot, contact_method, order_number, status, completed_at, state, city, address, payment_url, receipt_url)
-       VALUES ($1, $2, $3, $4, $5, $6, 'submitted', now(), $7, $8, $9, $10, $11)
-       RETURNING id`,
-      [cartId, profileId, JSON.stringify(items), totalSnapshot, contactMethod, orderNumber,
-       (cartResult.rows[0] as Record<string, unknown>)['state'], (cartResult.rows[0] as Record<string, unknown>)['city'], (cartResult.rows[0] as Record<string, unknown>)['address'],
-       (cartResult.rows[0] as Record<string, unknown>)['payment_url'], (cartResult.rows[0] as Record<string, unknown>)['receipt_url']],
-    );
-    const historyId = (historyResult.rows[0] as Record<string, unknown>)['id'] as string;
-
-    // Write initial status history entry
-    await client.query(
-      `INSERT INTO cart_order_status_history (cart_history_id, old_status, new_status, changed_by, note)
-       VALUES ($1, NULL, 'submitted', $2, NULL)`,
-      [historyId, profileId],
-    );
+    const { historyId, orderNumber } = await createCartHistory(client, {
+      originalCartId: cartId, profileId, isGuest: false, guestName: null, guestEmail: null, guestPhone: null,
+      items, totalSnapshot, currency: currencies[0]!, contactMethod,
+      state: (cartResult.rows[0] as Record<string, unknown>)['state'] as string | null,
+      city: (cartResult.rows[0] as Record<string, unknown>)['city'] as string | null,
+      address: (cartResult.rows[0] as Record<string, unknown>)['address'] as string | null,
+      paymentUrl: (cartResult.rows[0] as Record<string, unknown>)['payment_url'] as string | null,
+      receiptUrl: (cartResult.rows[0] as Record<string, unknown>)['receipt_url'] as string | null,
+    });
 
     await client.query(`UPDATE carts SET status = 'submitted', updated_at = now() WHERE id = $1`, [cartId]);
 
@@ -341,12 +379,47 @@ export async function submitActiveCart(
   } finally { client.release(); }
 }
 
+/** Persists a one-time guest checkout in the same order-history model as carts. */
+export async function submitGuestCart(input: import('../types/cart.types.js').CartSubmitInput): Promise<{ historyId: string; orderNumber: string }> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const items = (input.items ?? []).map((item) => ({
+      productId: item.productId ?? null, variantId: item.variantId ?? null,
+      materialId: item.materialId ?? null, colorId: item.colorId ?? null, sizeId: item.sizeId ?? null,
+      productNameSnapshot: item.productNameSnapshot ?? null, imageUrlSnapshot: item.imageUrlSnapshot ?? null,
+      quantity: item.quantity, selectedSize: item.selectedSize ?? null,
+      selectedColor: item.selectedColor ?? null, selectedMaterial: item.selectedMaterial ?? null,
+      variantLabelSnapshot: item.variantLabelSnapshot ?? null,
+      customMeasurements: item.customMeasurements ?? null, customNotes: item.customNotes ?? null,
+      unitPriceSnapshot: item.unitPriceSnapshot,
+      currency: item.currency,
+    }));
+    const currencies = [...new Set(items.map((item) => item.currency))];
+    const totalSnapshot = items.reduce((sum, item) => sum + item.unitPriceSnapshot * item.quantity, 0);
+
+    const { historyId, orderNumber } = await createCartHistory(client, {
+      originalCartId: null, profileId: null, isGuest: true,
+      guestName: input.guestName ?? null, guestEmail: input.guestEmail ?? null,
+      guestPhone: input.guestPhone ?? input.phoneNumber ?? null,
+      items, totalSnapshot, currency: currencies[0]!, contactMethod: input.contactMethod, state: input.state ?? null,
+      city: input.city ?? null, address: input.address ?? null, paymentUrl: input.paymentUrl ?? null,
+      receiptUrl: input.receiptUrl ?? null,
+    });
+    await client.query('COMMIT');
+    return { historyId, orderNumber };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally { client.release(); }
+}
+
 // ─── Customer cart history ────────────────────────────────────────────────────
 
 export async function findCartHistoryByProfileId(profileId: string): Promise<CartHistory[]> {
   const result = await pool.query(
-    `SELECT id, order_number, original_cart_id, profile_id, status, contact_method,
-            items, total_snapshot, state, city, address, payment_url, receipt_url, receipt_public_id, shipping_tracking_number, shipping_tracking_url, shipping_details,
+    `SELECT id, order_number, original_cart_id, profile_id, is_guest, guest_name, guest_email, guest_phone, status, contact_method,
+            items, total_snapshot, currency, state, city, address, payment_url, receipt_url, receipt_public_id, shipping_tracking_number, shipping_tracking_url, shipping_details,
             completed_at, created_at
      FROM cart_history WHERE profile_id = $1 ORDER BY completed_at DESC`,
     [profileId],
@@ -356,8 +429,8 @@ export async function findCartHistoryByProfileId(profileId: string): Promise<Car
 
 export async function findCartHistoryById(id: string): Promise<CartHistory | null> {
   const result = await pool.query(
-    `SELECT id, order_number, original_cart_id, profile_id, status, contact_method,
-            items, total_snapshot, state, city, address, payment_url, receipt_url, receipt_public_id, shipping_tracking_number, shipping_tracking_url, shipping_details,
+    `SELECT id, order_number, original_cart_id, profile_id, is_guest, guest_name, guest_email, guest_phone, status, contact_method,
+            items, total_snapshot, currency, state, city, address, payment_url, receipt_url, receipt_public_id, shipping_tracking_number, shipping_tracking_url, shipping_details,
             completed_at, created_at
      FROM cart_history WHERE id = $1`,
     [id],
@@ -372,8 +445,8 @@ export async function findCartHistoryById(id: string): Promise<CartHistory | nul
 
 export async function findCartHistoryByOrderNumber(orderNumber: string): Promise<CartHistory | null> {
   const result = await pool.query(
-    `SELECT id, order_number, original_cart_id, profile_id, status, contact_method,
-            items, total_snapshot, state, city, address, payment_url, receipt_url, receipt_public_id, shipping_tracking_number, shipping_tracking_url, shipping_details,
+    `SELECT id, order_number, original_cart_id, profile_id, is_guest, guest_name, guest_email, guest_phone, status, contact_method,
+            items, total_snapshot, currency, state, city, address, payment_url, receipt_url, receipt_public_id, shipping_tracking_number, shipping_tracking_url, shipping_details,
             completed_at, created_at
      FROM cart_history WHERE order_number = $1`,
     [orderNumber],
@@ -409,13 +482,13 @@ export async function findAllCartOrdersAdmin(filters: {
 
   const result = await pool.query(
     `SELECT
-       ch.id, ch.order_number, ch.original_cart_id, ch.profile_id, ch.status,
-       ch.contact_method, ch.items, ch.total_snapshot, ch.state, ch.city, ch.address,
+       ch.id, ch.order_number, ch.original_cart_id, ch.profile_id, ch.is_guest, ch.guest_name, ch.guest_email, ch.guest_phone, ch.status,
+       ch.contact_method, ch.items, ch.total_snapshot, ch.currency, ch.state, ch.city, ch.address,
        ch.payment_url, ch.receipt_url, ch.receipt_public_id, ch.shipping_tracking_number, ch.shipping_tracking_url, ch.shipping_details,
        ch.completed_at, ch.created_at,
-       p.full_name  AS customer_name,
-       p.email      AS customer_email,
-       p.phone      AS customer_phone
+       COALESCE(p.full_name, ch.guest_name) AS customer_name,
+       COALESCE(p.email, ch.guest_email) AS customer_email,
+       COALESCE(p.phone, ch.guest_phone) AS customer_phone
      FROM cart_history ch
      LEFT JOIN profiles p   ON p.id = ch.profile_id
      ${where}
@@ -434,13 +507,13 @@ export async function findAllCartOrdersAdmin(filters: {
 export async function findCartOrderByIdAdmin(id: string): Promise<AdminCartOrder | null> {
   const result = await pool.query(
     `SELECT
-       ch.id, ch.order_number, ch.original_cart_id, ch.profile_id, ch.status,
-       ch.contact_method, ch.items, ch.total_snapshot, ch.state, ch.city, ch.address,
+       ch.id, ch.order_number, ch.original_cart_id, ch.profile_id, ch.is_guest, ch.guest_name, ch.guest_email, ch.guest_phone, ch.status,
+       ch.contact_method, ch.items, ch.total_snapshot, ch.currency, ch.state, ch.city, ch.address,
        ch.payment_url, ch.receipt_url, ch.receipt_public_id, ch.shipping_tracking_number, ch.shipping_tracking_url, ch.shipping_details,
        ch.completed_at, ch.created_at,
-       p.full_name  AS customer_name,
-       p.email      AS customer_email,
-       p.phone      AS customer_phone
+       COALESCE(p.full_name, ch.guest_name) AS customer_name,
+       COALESCE(p.email, ch.guest_email) AS customer_email,
+       COALESCE(p.phone, ch.guest_phone) AS customer_phone
      FROM cart_history ch
      LEFT JOIN profiles p   ON p.id = ch.profile_id
      WHERE ch.id = $1`,

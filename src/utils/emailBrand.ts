@@ -161,7 +161,7 @@ export function customerDetailsBlock(opts: {
   </table>`;
 }
 
-export function totalBlock(totalSnapshot: number): string {
+export function totalBlock(totalSnapshot: number, currency: string | null = null): string {
   return `
   <table width="100%" cellpadding="0" cellspacing="0" border="0"
          style="border-collapse:collapse;margin-top:8px;margin-bottom:32px;">
@@ -173,7 +173,7 @@ export function totalBlock(totalSnapshot: number): string {
               Order Total
             </td>
             <td align="right" style="font-size:22px;font-weight:700;color:#ffffff;font-family:Georgia,serif;">
-              ${formatPrice(totalSnapshot)}
+              ${currency ? `${currency} ${totalSnapshot.toLocaleString('en-NG')}` : formatPrice(totalSnapshot)}
             </td>
           </tr>
         </table>

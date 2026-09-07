@@ -7,6 +7,7 @@ import {
   findCartHistoryByOrderNumber,
   findOrCreateActiveCart,
   submitActiveCart,
+  submitGuestCart as persistGuestCart,
   updateCartItem,
   findAllCartOrdersAdmin,
   findCartOrderByIdAdmin,
@@ -22,6 +23,7 @@ import { sendEmail } from '../utils/mailer.js';
 import { buildCartSubmissionEmail } from '../utils/cartSubmissionEmail.js';
 import { buildCustomerCartEmail, buildCustomerStatusEmail } from '../utils/customerEmails.js';
 import { getNotificationSettings } from '../utils/notificationSettings.js';
+import { assertActiveCurrencyCodes } from './currency.service.js';
 import { env } from '../config/env.js';
 import type {
   AddCartItemInput,
@@ -43,6 +45,7 @@ export async function getMyCart(profileId: string): Promise<Cart> {
 }
 
 export async function addItemToCart(profileId: string, input: AddCartItemInput): Promise<Cart> {
+  await assertActiveCurrencyCodes([input.currency]);
   return addItemToActiveCart(profileId, input);
 }
 
@@ -110,6 +113,24 @@ export async function submitMyCart(user: AuthUser, input: CartSubmitInput): Prom
   };
 }
 
+export async function submitGuestCart(input: CartSubmitInput): Promise<CartSubmitResult> {
+  if (!input.items?.length) throw AppError.badRequest('items must contain at least one item');
+  await assertActiveCurrencyCodes(input.items.map((item) => item.currency));
+  let result: Awaited<ReturnType<typeof persistGuestCart>>;
+  result = await persistGuestCart(input);
+
+  sendGuestCartEmails(input, result).catch((err: unknown) => {
+    console.error('[cart] Failed to send guest submission emails:', err);
+  });
+
+  return {
+    submittedCartId: null,
+    historyId: result.historyId,
+    orderNumber: result.orderNumber,
+    newActiveCartId: null,
+  };
+}
+
 async function sendCartEmails(
   user: AuthUser,
   input: CartSubmitInput,
@@ -131,6 +152,7 @@ async function sendCartEmails(
       historyId: result.historyId,
       items: historyRecord.items,
       totalSnapshot: historyRecord.totalSnapshot,
+      currency: historyRecord.currency,
       submittedCartId: result.historyId,
     });
     emails.push(sendEmail({
@@ -148,6 +170,7 @@ async function sendCartEmails(
       status: 'submitted',
       submittedAt: historyRecord.completedAt,
       totalSnapshot: historyRecord.totalSnapshot,
+      currency: historyRecord.currency,
       items: historyRecord.items,
     });
     emails.push(sendEmail({
@@ -158,6 +181,39 @@ async function sendCartEmails(
   }
   const results = await Promise.allSettled(emails);
   results.filter((entry) => entry.status === 'rejected').forEach((entry) => console.error('[cart] Submission email failed:', entry.reason));
+}
+
+async function sendGuestCartEmails(
+  input: CartSubmitInput,
+  result: { historyId: string; orderNumber: string },
+): Promise<void> {
+  const settings = await getNotificationSettings();
+  const order = await findCartHistoryByOrderNumber(result.orderNumber);
+  if (!order) return;
+  const customerName = input.guestName ?? 'Guest Customer';
+  const customerEmail = input.guestEmail ?? 'Not provided';
+  const phoneNumber = input.guestPhone ?? input.phoneNumber ?? null;
+  const emails: Promise<void>[] = [];
+
+  if (settings.notifyAdminOnCart) {
+    emails.push(sendEmail({
+      to: settings.notificationEmail,
+      subject: `New Cart Submission — ${result.orderNumber}`,
+      html: buildCartSubmissionEmail({ customerName, customerEmail, contactMethod: input.contactMethod,
+        phoneNumber, orderNumber: result.orderNumber, historyId: result.historyId, items: order.items,
+        totalSnapshot: order.totalSnapshot, currency: order.currency, submittedCartId: result.historyId }),
+    }));
+  }
+  if (settings.notifyCustomerOnCart && input.guestEmail) {
+    emails.push(sendEmail({
+      to: input.guestEmail,
+      subject: `Your Order — ${result.orderNumber}`,
+      html: buildCustomerCartEmail({ customerName, orderNumber: result.orderNumber, historyId: result.historyId,
+        status: order.status, submittedAt: order.completedAt, totalSnapshot: order.totalSnapshot, currency: order.currency, items: order.items }),
+    }));
+  }
+  const results = await Promise.allSettled(emails);
+  results.filter((entry) => entry.status === 'rejected').forEach((entry) => console.error('[cart] Guest submission email failed:', entry.reason));
 }
 
 // ─── Tracking (public) ────────────────────────────────────────────────────────

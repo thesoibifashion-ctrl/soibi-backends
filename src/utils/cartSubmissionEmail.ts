@@ -21,7 +21,8 @@ function cartItemRow(item: CartHistoryItem): string {
        </div>`;
 
   const productLink = item.productId ? `${env.adminUrl}/products/${item.productId}` : null;
-  const itemTotal = formatPrice(item.unitPriceSnapshot * item.quantity);
+  const formatCartPrice = (amount: number) => item.currency ? `${item.currency} ${amount.toLocaleString('en-NG')}` : formatPrice(amount);
+  const itemTotal = formatCartPrice(item.unitPriceSnapshot * item.quantity);
 
   return `
   <table width="100%" cellpadding="0" cellspacing="0" border="0"
@@ -39,7 +40,7 @@ function cartItemRow(item: CartHistoryItem): string {
           ${item.selectedSize != null ? metaRow('Size', String(item.selectedSize)) : ''}
           ${item.selectedColor ? metaRow('Color', item.selectedColor) : ''}
           ${item.selectedMaterial ? metaRow('Material', item.selectedMaterial) : ''}
-          ${metaRow('Unit Price', formatPrice(item.unitPriceSnapshot))}
+          ${metaRow('Unit Price', formatCartPrice(item.unitPriceSnapshot))}
           ${metaRow('Item Total', itemTotal, true)}
         </table>
       </td>
@@ -56,6 +57,7 @@ export interface CartSubmissionEmailData {
   historyId: string;
   items: CartHistoryItem[];
   totalSnapshot: number;
+  currency: string | null;
   submittedCartId: string;
 }
 
@@ -75,7 +77,7 @@ export function buildCartSubmissionEmail(data: CartSubmissionEmailData): string 
     </h2>
     ${data.items.map(cartItemRow).join('\n')}
 
-    ${totalBlock(data.totalSnapshot)}
+    ${totalBlock(data.totalSnapshot, data.currency)}
     ${ctaButton(`${env.adminUrl}/cart/history/${data.historyId}`, 'View Order')}
   `;
 

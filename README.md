@@ -28,6 +28,7 @@ All API responses use a consistent JSON envelope with `success`, `message`, and 
 - Guest andz authenticated quote submission with contact preference and email notifications - Contact submissions and admin review
 - SBS Academy registrations and admin review
 - Authenticated customer carts with price snapshots, submission lifecycle, and cart history
+- One-time guest cart submissions, stored alongside customer cart orders
 - Authenticated product favorites
 - Internal email notifications to Signature By Sarah on every quote and cart submission
 
@@ -67,12 +68,14 @@ Apply every SQL file in `src/database/migrations` in numeric order to a new Post
 npm run db:migrate
 ```
 
-The command uses the existing `DATABASE_URL`, runs migrations from `001` through the latest file in numeric filename order, and stops immediately if any migration fails. It does not keep a migration-history table, so use it once for a clean Pxxl database; do not re-run it against a database where these SQL files have already been applied. The initial migration creates the backend-owned `profiles` account table; later migrations extend the ecommerce schema. A pre-existing database created from the former external-auth schema needs a separately planned account/data migration before using these revised files:
+The command uses the existing `DATABASE_URL`, runs migrations from `001` through the latest file in numeric filename order, and stops immediately if any migration fails. It creates and maintains a `schema_migrations` table, so re-running it skips migrations that have already completed. The initial migration creates the backend-owned `profiles` account table; later migrations extend the ecommerce schema. A pre-existing database created from the former external-auth schema needs a separately planned account/data migration before using these revised files:
 
 - `008_one_pending_draft_per_customer.sql` — adds the partial unique index that enforces one active draft per authenticated customer at the database level.
 - `009_cart_overhaul.sql` — replaces the guest-session cart design with a status-based authenticated cart. Adds `status` (`active`, `submitted`, `abandoned`) to `carts`, a partial unique index enforcing one active cart per profile, snapshot columns on `cart_items` (`product_name_snapshot`, `image_url_snapshot`, `selected_color`, `selected_material`, `selected_size`), makes `cart_items.product_id` nullable, and creates the `cart_history` table.
 - `010_quote_contact_method.sql` — adds `contact_method` (`email`, `whatsapp`) to `quote_requests` so the customer's preferred contact channel is stored alongside the quote.
 - `016_google_oauth_profiles.sql` — allows passwordless Google-only accounts and stores Google’s immutable subject identifier.
+- `019_guest_cart_submissions.sql` — permits cart-history records without a profile and adds guest name, email, phone, and guest-order indexing fields for one-time guest cart submissions.
+- `020_cart_order_currency.sql` — stores the selected currency code with cart-item and submitted-order price snapshots.
 
 ### Production
 
@@ -622,7 +625,7 @@ The email is fire-and-forget. If it fails, the quote submission is unaffected.
 
 ## Cart
 
-Cart endpoints are authenticated-only. Each authenticated profile has one active cart at a time. Cart items store complete snapshots of the product name, image, price, size, color, material, and optional custom measurements at the time of adding — the cart display never depends on live product data. When the same product and configuration combination is added again, the quantity increases instead of creating a duplicate row.
+Cart management is authenticated-only: each authenticated profile has one active cart at a time. `POST /api/cart/submit` additionally supports a one-time guest checkout without a token. Cart items store complete snapshots of the product name, image, price, size, color, material, and optional custom measurements at the time of adding or guest submission — cart and order displays never depend on live product data. When the same product and configuration combination is added again to an authenticated cart, the quantity increases instead of creating a duplicate row.
 
 ### Cart status lifecycle
 
@@ -641,10 +644,11 @@ Each `cart_items` row stores the complete state of the item at the time it was a
 - `product_name_snapshot` — the product name as it appeared when added
 - `image_url_snapshot` — the product image URL at time of adding
 - `unit_price_snapshot` — the price at time of adding
+- `currency` — the three-letter code from the existing active admin-managed currency catalogue (for example `NGN`, `USD`, `GBP`, or `EUR`)
 - `selected_color`, `selected_material`, `selected_size` — the customer's chosen options
 - `custom_measurements` — an optional JSONB object of product-defined measurement values
 
-These snapshots are the source of truth for displaying the cart. If a product is later renamed, repriced, or deleted, the cart item still shows what the customer originally selected. `product_id` is nullable to support fully custom items with no catalogue record.
+These snapshots are the source of truth for displaying the cart. If a product is later renamed, repriced, or deleted, the cart item still shows what the customer originally selected. `product_id` is nullable to support fully custom items with no catalogue record. `unitPriceSnapshot` and `totalSnapshot` remain JSON numbers; currency is returned separately as a code.
 
 ### Endpoints
 
@@ -655,7 +659,7 @@ These snapshots are the source of truth for displaying the cart. If a product is
 | `PATCH` | `/api/cart/items/:id` | Customer token | Updates quantity, size, color, or material on an owned active cart item. At least one field required. |
 | `DELETE` | `/api/cart/items/:id` | Customer token | Removes one item from the active cart. |
 | `DELETE` | `/api/cart` | Customer token | Clears all items from the active cart. |
-| `POST` | `/api/cart/submit` | Customer token | Submits the active cart: records contact preference, snapshots items to history, marks cart submitted, and creates a new empty active cart. |
+| `POST` | `/api/cart/submit` | Public; customer token optional | Submits an authenticated user's active cart, or creates a one-time guest order from the supplied item snapshots. |
 | `GET` | `/api/cart/history` | Customer token | Returns all previously submitted cart snapshots for the authenticated profile, newest first. |
 
 ### Add an item
@@ -672,6 +676,7 @@ The frontend sends the complete item snapshot. The backend does not look up prod
   "selectedColor": "Brown",
   "selectedMaterial": "Full Grain Leather",
   "unitPriceSnapshot": 85000,
+  "currency": "NGN",
   "customMeasurements": {
     "footLength": "10.5",
     "footWidth": "4.2"
@@ -679,7 +684,7 @@ The frontend sends the complete item snapshot. The backend does not look up prod
 }
 ```
 
-`productId` is optional and nullable. All snapshot fields except `quantity` and `unitPriceSnapshot` are optional. `customMeasurements` accepts a dynamic JSON object or `null`; its keys are not hard-coded. Duplicate detection matches on `productId`, `selectedSize`, `selectedColor`, `selectedMaterial`, and `customMeasurements`; a match increases quantity instead of inserting a new row.
+`productId` is optional and nullable. All snapshot fields except `quantity`, `unitPriceSnapshot`, and `currency` are optional. `currency` must be an active code from the existing admin-managed currency catalogue. `customMeasurements` accepts a dynamic JSON object or `null`; its keys are not hard-coded. Duplicate detection matches on `productId`, `selectedSize`, `selectedColor`, `selectedMaterial`, `customMeasurements`, and `currency`; a match increases quantity instead of inserting a new row. A cart may contain items in different currencies.
 
 ### Update a cart item
 
@@ -702,7 +707,7 @@ Set `customMeasurements` to `null` to remove saved measurements from an item.
 
 ### Submit the cart
 
-The frontend sends the customer's contact preference with the submission request.
+The frontend sends the customer's contact preference with the submission request. With a customer token, the API submits that user's active cart. Without a token, it creates a guest order from the supplied `items` array; guest orders do not create an account or an active cart.
 
 Submit with email contact:
 
@@ -729,7 +734,34 @@ Submit with WhatsApp using the phone number already saved on the profile:
 }
 ```
 
-`contactMethod` is required. `phoneNumber` is optional. When `whatsapp` is selected and `phoneNumber` is provided, the number is saved to the customer's profile for future submissions. When `whatsapp` is selected and no `phoneNumber` is provided, the phone already saved on the profile is used. If no phone exists anywhere, the request is rejected with a `400` error.
+`contactMethod` is required. `phoneNumber` is optional. For authenticated submissions, when `whatsapp` is selected and `phoneNumber` is provided, the number is saved to the customer's profile for future submissions. When `whatsapp` is selected and no `phoneNumber` is provided, the phone already saved on the profile is used. If no phone exists anywhere, the request is rejected with a `400` error.
+
+For a guest submission, include `items` (at least one item), plus any available guest and delivery details. `guestName`, `guestEmail`, `guestPhone`, `state`, `city`, `address`, `paymentUrl`, and `receiptUrl` are accepted. `guestEmail` enables the customer confirmation email when `notify_customer_on_cart` is enabled.
+
+```json
+{
+  "contactMethod": "whatsapp",
+  "guestName": "Ada Okafor",
+  "guestEmail": "ada@example.com",
+  "guestPhone": "+2348012345678",
+  "state": "Lagos",
+  "city": "Victoria Island",
+  "address": "12 Example Street",
+  "items": [
+    {
+      "productId": "00000000-0000-0000-0000-000000000000",
+      "productNameSnapshot": "Classic Leather Loafer",
+      "imageUrlSnapshot": "https://images.example.com/loafer.jpg",
+      "quantity": 1,
+      "selectedSize": 42,
+      "selectedColor": "Brown",
+      "selectedMaterial": "Full Grain Leather",
+      "unitPriceSnapshot": 85000,
+      "currency": "NGN"
+    }
+  ]
+}
+```
 
 Response:
 
@@ -740,20 +772,22 @@ Response:
   "data": {
     "submittedCartId": "00000000-0000-0000-0000-000000000000",
     "historyId": "00000000-0000-0000-0000-000000000001",
+    "orderNumber": "SBS-2026-C00001",
     "newActiveCartId": "00000000-0000-0000-0000-000000000002"
   }
 }
 ```
 
+For a guest submission, `submittedCartId` and `newActiveCartId` are `null`; `historyId` and `orderNumber` identify the submitted order.
+
 Possible errors:
 
 | Status | Condition |
 | --- | --- |
-| `400 Bad Request` | `contactMethod` missing or invalid, or `whatsapp` selected with no phone number available. |
-| `401 Unauthorized` | No valid token provided. |
+| `400 Bad Request` | `contactMethod` missing or invalid; guest submission has no `items`; or an authenticated WhatsApp submission has no available phone number. |
 | `404 Not Found` | The authenticated profile has no active cart. |
 
-The entire submission runs in a single database transaction. The active cart row is locked at the start to prevent concurrent submissions. If any step fails, the transaction rolls back and the cart remains active and unchanged.
+Each submission runs in a single database transaction. Authenticated submissions lock the active cart row at the start to prevent concurrent submission; guest submissions write a standalone order-history record. Both flows preserve each selected item currency. If any step fails, the transaction rolls back. For authenticated submissions, the cart remains active and unchanged.
 
 ### Cart submission lifecycle
 
@@ -799,10 +833,12 @@ Customer immediately has a new empty active cart
         "selectedSize": 42,
         "selectedColor": "Brown",
         "selectedMaterial": "Full Grain Leather",
-        "unitPriceSnapshot": 85000
+        "unitPriceSnapshot": 85000,
+        "currency": "NGN"
       }
     ],
     "totalSnapshot": 85000,
+    "currency": "NGN",
     "completedAt": "2025-01-01T12:00:00.000Z",
     "createdAt": "2025-01-01T12:00:00.000Z"
   }
@@ -811,7 +847,7 @@ Customer immediately has a new empty active cart
 
 ### Cart email notification
 
-After every successful cart submission, the existing internal notification email is sent to Signature By Sarah and the customer confirmation email is sent when `notify_customer_on_cart` is enabled. The customer email includes the order number, current status, cart item snapshots, total, and a `FRONTEND_URL/tracking/cart/:orderNumber` link. The internal email includes the customer's name, email, phone, preferred contact method, all cart items with snapshots, the order total, and an `ADMIN_URL` dashboard link. Delivery is non-blocking and cannot undo the submitted cart.
+After every successful cart submission, the existing internal notification email is sent to Signature By Sarah and the customer confirmation email is sent when `notify_customer_on_cart` is enabled. For authenticated orders, the customer email goes to the account email; for guest orders, it goes to `guestEmail` when supplied. The customer email includes the order number, current status, cart item snapshots, total, and a `FRONTEND_URL/tracking/cart/:orderNumber` link. The internal email includes the customer's name, email, phone, preferred contact method, all cart items with snapshots, the order total, and an `ADMIN_URL` dashboard link. Delivery is non-blocking and cannot undo the submitted cart.
 
 ## Order administration, tracking, payments, and notifications
 
@@ -843,14 +879,14 @@ Customers never upload files through this backend; receipt URLs/public IDs are s
 
 ### Customer tracking
 
-Cart tracking is ownership-checked, so an authenticated customer cannot retrieve another customer's cart order. Quote tracking uses the customer-facing quote reference from the email link and returns only the safe tracking response.
+Cart tracking is public and uses the cart order number as the customer-facing tracking reference, so it supports both authenticated and guest orders. It returns only safe tracking data: order number/type, status history without internal notes, submission dates, item snapshots, numeric total, its `currency`, and shipping tracking number/URL. It never exposes customer, contact, address, payment, receipt, shipping-detail, or admin-note data. Quote tracking likewise uses the customer-facing quote reference and returns only its safe tracking response.
 
-| Method | Endpoint |
-| --- | --- |
-| `GET` | `/api/tracking/quote/:orderNumber` |
-| `GET` | `/api/tracking/cart/:orderNumber` |
+| Method | Endpoint | Auth |
+| --- | --- | --- |
+| `GET` | `/api/tracking/quote/:orderNumber` | Public |
+| `GET` | `/api/tracking/cart/:orderNumber` | Public |
 
-Tracking responses include the order number/type, flexible current status, safe status history, dates, complete snapshots, total, payment/receipt fields, and shipping data. They deliberately omit admin notes, customer profile data, and status-change actor data.
+Tracking responses include the order number/type, flexible current status, safe status history, dates, complete snapshots, total, and shipping tracking data. They deliberately omit admin notes, customer profile data, contact and address details, payment/receipt fields, shipping details, and status-change actor data.
 
 ### Contact and academy administration
 
@@ -919,7 +955,7 @@ Content-Type: application/json
 { "status": "reviewing" }
 ```
 
-`GET /api/admin/analytics?from=2026-01-01&to=2026-08-01` is restricted to `admin` and `super_admin`. It returns product lifecycle and daily-view totals/top products, quote and submitted-cart status/value/recent activity, user totals, contact totals/unread/recent data, and academy status/experience breakdowns. Both dates are optional and use inclusive calendar dates.
+`GET /api/admin/analytics?from=2026-01-01&to=2026-08-01` is restricted to `admin` and `super_admin`. It returns product lifecycle and daily-view totals/top products, quote and submitted-cart status/value/recent activity, user totals, contact totals/unread/recent data, and academy status/experience breakdowns. Cart values are returned as `carts.totalValueByCurrency`, an array of numeric `totalSnapshot` values paired with their `currency`; totals are never combined across currencies. Both dates are optional and use inclusive calendar dates.
 
 Apply `src/database/migrations/015_addresses_analytics_and_product_views.sql` after migrations 001–014. It adds only nullable address/payment columns and the daily product-view aggregate table; no new environment variables are required.
 

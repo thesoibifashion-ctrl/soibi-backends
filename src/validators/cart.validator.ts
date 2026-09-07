@@ -16,6 +16,7 @@ export const addCartItemSchema = z.object({
   customMeasurements: z.record(z.string(), z.unknown()).nullable().optional(),
   customNotes: z.string().trim().max(10_000).nullable().optional(),
   unitPriceSnapshot: z.number().min(0, 'unitPriceSnapshot must be >= 0'),
+  currency: z.string().trim().regex(/^[A-Za-z]{3}$/, 'currency must be a three-letter code').transform((value) => value.toUpperCase()),
 });
 
 export const updateCartItemSchema = z
@@ -87,4 +88,13 @@ export const submitCartSchema = z.object({
     .max(20, 'phoneNumber must be at most 20 characters')
     .nullable()
     .optional(),
+  items: z.array(addCartItemSchema).min(1, 'items must contain at least one item').optional(),
+  guestName: z.string().trim().min(1).max(255).nullable().optional(),
+  guestEmail: z.string().trim().email('guestEmail must be a valid email').max(255).nullable().optional(),
+  guestPhone: z.string().trim().min(7, 'guestPhone must be at least 7 characters').max(20).nullable().optional(),
+  state: z.string().trim().max(100).nullable().optional(),
+  city: z.string().trim().max(100).nullable().optional(),
+  address: z.string().trim().max(2000).nullable().optional(),
+  paymentUrl: z.string().url('paymentUrl must be a valid URL').nullable().optional(),
+  receiptUrl: z.string().url('receiptUrl must be a valid URL').nullable().optional(),
 });

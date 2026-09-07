@@ -68,7 +68,10 @@ function itemSummaryBlock(items: Array<QuoteItem | CartHistoryItem>): string {
     const size = 'size' in quoteItem ? quoteItem.size : quoteItem.selectedSize;
     const color = 'colorNameSnapshot' in quoteItem ? quoteItem.colorNameSnapshot : quoteItem.selectedColor;
     const material = 'materialNameSnapshot' in quoteItem ? quoteItem.materialNameSnapshot : quoteItem.selectedMaterial;
-    const price = quoteItem.unitPriceSnapshot == null ? 'To be confirmed' : formatPrice(quoteItem.unitPriceSnapshot);
+    const currency = 'currency' in quoteItem ? quoteItem.currency : null;
+    const price = quoteItem.unitPriceSnapshot == null
+      ? 'To be confirmed'
+      : currency ? `${currency} ${quoteItem.unitPriceSnapshot.toLocaleString('en-NG')}` : formatPrice(quoteItem.unitPriceSnapshot);
     return `<tr>
       <td style="padding:8px 0;font-family:Arial,sans-serif;color:${BRAND.black};">${val(name)}</td>
       <td style="padding:8px 0;font-family:Arial,sans-serif;color:#666;text-align:center;">${quoteItem.quantity}</td>
@@ -133,6 +136,7 @@ export interface CustomerCartEmailData {
   status: string;
   submittedAt: string;
   totalSnapshot: number;
+  currency: string | null;
   items: CartHistoryItem[];
 }
 
@@ -163,7 +167,7 @@ export function buildCustomerCartEmail(data: CustomerCartEmailData): string {
                 Order Total
               </td>
               <td align="right" style="font-size:22px;font-weight:700;color:#ffffff;font-family:Georgia,serif;">
-                ${formatPrice(data.totalSnapshot)}
+                ${data.currency ? `${data.currency} ${data.totalSnapshot.toLocaleString('en-NG')}` : formatPrice(data.totalSnapshot)}
               </td>
             </tr>
           </table>
