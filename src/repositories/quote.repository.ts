@@ -111,7 +111,7 @@ export async function createQuoteWithItems(data: {
       [year],
     );
     const count = parseInt((countResult.rows[0] as Record<string, unknown>)['total'] as string, 10);
-    const referenceNumber = `SBS-${year}-${String(count + 1).padStart(5, '0')}`;
+    const referenceNumber = `SOIBI-${year}-${String(count + 1).padStart(5, '0')}`;
 
     if (data.profileId && data.phoneNumber) {
       await client.query(

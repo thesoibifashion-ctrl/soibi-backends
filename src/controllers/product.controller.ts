@@ -47,8 +47,8 @@ export async function listProducts(
     const sort = getString('sort');
     if (sort && !['newest', 'price_asc', 'price_desc', 'size_asc', 'size_desc', 'collection_sort'].includes(sort)) throw AppError.badRequest('sort must be newest, price_asc, price_desc, size_asc, size_desc, or collection_sort');
     const gender = getString('gender');
-    if (gender && !['male', 'female', 'unisex'].includes(gender)) throw AppError.badRequest('gender must be male, female, or unisex');
-    const products = await getAllProducts({ color: getString('color'), collection: getString('collection'), category: getString('category'), size: getString('size'), material: getString('material'), gender: gender as 'male' | 'female' | 'unisex' | undefined, sort: sort as ProductFilter['sort'] });
+    if (gender !== undefined && gender.trim().length === 0) throw AppError.badRequest('gender must not be empty');
+    const products = await getAllProducts({ color: getString('color'), collection: getString('collection'), category: getString('category'), size: getString('size'), material: getString('material'), gender, sort: sort as ProductFilter['sort'] });
     sendSuccess(res, 'Products retrieved', products);
   } catch (err) {
     next(err);

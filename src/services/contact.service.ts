@@ -28,12 +28,12 @@ async function sendContactEmails(submission: ContactSubmission): Promise<void> {
   const emails: Promise<void>[] = [];
   if (settings.notifyAdminOnContact) emails.push(sendEmail({
       to: settings.notificationEmail,
-      subject: 'New Contact Submission — Signature By Sarah',
+      subject: 'New Contact Submission — Soibi',
       html: buildAdminContactEmail(submission),
     }));
   if (settings.notifyCustomerOnContact) emails.push(sendEmail({
       to: submission.email,
-      subject: 'Message Received — Signature By Sarah',
+      subject: 'Message Received — Soibi',
       html: buildCustomerContactEmail(submission.name, submission.subject),
     }));
   const results = await Promise.allSettled(emails);

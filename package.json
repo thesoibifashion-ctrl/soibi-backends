@@ -1,7 +1,7 @@
 {
   "name": "sbs-backend",
   "version": "1.0.0",
-  "description": "Signature by Sarah — Backend API",
+  "description": "Soibi — Backend API",
   "type": "module",
   "main": "dist/server.js",
   "scripts": {

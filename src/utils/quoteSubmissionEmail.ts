@@ -147,7 +147,7 @@ export function buildQuoteSubmissionEmail(data: QuoteSubmissionEmailData): strin
   `;
 
   return emailShell({
-    title: 'New Quote Submission — Signature By Sarah',
+    title: 'New Quote Submission — Soibi',
     heading: 'New Quote Submission',
     badgeLabel: data.isGuest ? 'Guest Quote Request' : 'Customer Quote Request',
     bodyHtml,

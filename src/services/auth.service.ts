@@ -1,17 +1,20 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import { randomInt } from 'node:crypto';
 import { env } from '../config/env.js';
 import {
   createProfile,
   findProfileById,
+  findProfileByEmail,
   findProfileCredentialsByEmail,
   findProfileByGoogleSubject,
   linkGoogleSubject,
 } from '../repositories/profile.repository.js';
+import { consumeEmailLoginCode, createEmailLoginCode } from '../repositories/email-login-code.repository.js';
 import { AppError } from '../utils/AppError.js';
 import type { AuthUser } from '../types/api.types.js';
 
-const PASSWORD_SALT_ROUNDS = 12;
+const OTP_SALT_ROUNDS = 12;
 
 export interface AuthSession {
   accessToken: string;
@@ -42,32 +45,32 @@ function createSession(user: AuthUser): AuthSession {
   return { accessToken, tokenType: 'Bearer', expiresIn: env.jwtExpiresIn, user };
 }
 
-export async function registerUser(data: {
-  email: string;
-  password: string;
-  fullName: string;
-}): Promise<AuthSession> {
-  const existing = await findProfileCredentialsByEmail(data.email);
-  if (existing) throw AppError.conflict('An account with this email already exists');
-
-  const passwordHash = await bcrypt.hash(data.password, PASSWORD_SALT_ROUNDS);
-  try {
-    const user = await createProfile({ email: data.email, passwordHash, fullName: data.fullName });
-    return createSession(user);
-  } catch (error: unknown) {
-    if (isUniqueViolation(error)) throw AppError.conflict('An account with this email already exists');
-    throw error;
-  }
+export async function requestEmailLoginCode(email: string): Promise<string> {
+  const code = String(randomInt(100000, 1_000_000));
+  const created = await createEmailLoginCode(email, await bcrypt.hash(code, OTP_SALT_ROUNDS), new Date(Date.now() + 10 * 60 * 1000));
+  if (!created) throw AppError.tooManyRequests('Please wait 60 seconds before requesting another code');
+  return code;
 }
 
-export async function loginUser(email: string, password: string): Promise<AuthSession> {
-  const profile = await findProfileCredentialsByEmail(email);
-  const validPassword = profile?.passwordHash ? await bcrypt.compare(password, profile.passwordHash) : false;
+export async function verifyEmailLoginCode(email: string, code: string): Promise<AuthSession> {
+  const valid = await consumeEmailLoginCode(email, (hash) => bcrypt.compare(code, hash));
+  if (!valid) throw AppError.unauthorized('Invalid or expired sign-in code');
 
-  if (!profile || !validPassword) throw AppError.unauthorized('Invalid email or password');
-  if (!profile.isActive) throw AppError.forbidden('Account is disabled');
-
-  const { passwordHash: _passwordHash, ...user } = profile;
+  let user = await findProfileByEmail(email);
+  if (!user) {
+    try {
+      user = await createProfile({
+        email,
+        passwordHash: null,
+        fullName: email.split('@')[0] || 'Soibi customer',
+      });
+    } catch (error: unknown) {
+      if (!isUniqueViolation(error)) throw error;
+      user = await findProfileByEmail(email);
+      if (!user) throw error;
+    }
+  }
+  if (!user.isActive) throw AppError.forbidden('Account is disabled');
   return createSession(user);
 }
 

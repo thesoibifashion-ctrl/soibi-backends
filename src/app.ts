@@ -37,6 +37,8 @@ import adminAnalyticsRoutes from './routes/admin-analytics.routes.js';
 import adminMeasurementRoutes from './routes/admin-measurement.routes.js';
 import currencyRoutes from './routes/currency.routes.js';
 import adminCurrencyRoutes from './routes/admin-currency.routes.js';
+import blogRoutes from './routes/blog.routes.js';
+import adminBlogRoutes from './routes/admin-blog.routes.js';
 const app = express();
 
 // ─── Security ─────────────────────────────────────────────────────────────────
@@ -73,6 +75,8 @@ app.use('/api/admin/contact', adminContactRoutes);
 app.use('/api/admin/academy', adminAcademyRoutes);
 app.use('/api/gallery', galleryRoutes);
 app.use('/api/admin/gallery', adminGalleryRoutes);
+app.use('/api/blog', blogRoutes);
+app.use('/api/admin/blog', adminBlogRoutes);
 app.use('/api/cart', cartRoutes);
 app.use('/api/favorites', favoriteRoutes);
 app.use('/api/home', homepageRoutes);

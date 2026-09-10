@@ -31,4 +31,8 @@ export class AppError extends Error {
   static conflict(message: string) {
     return new AppError(message, HttpStatus.CONFLICT);
   }
+
+  static tooManyRequests(message: string) {
+    return new AppError(message, HttpStatus.TOO_MANY_REQUESTS);
+  }
 }

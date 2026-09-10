@@ -1,11 +1,11 @@
-// Shared brand constants and HTML helpers for all SBS notification emails.
+// Shared brand constants and HTML helpers for all Soibi notification emails.
 
 export const BRAND = {
   black: '#0E0E0E',
   gold: '#C9A227',
   offWhite: '#F8F6F2',
   gray: '#EDEAE4',
-  logoUrl: 'https://res.cloudinary.com/demo/image/upload/v_placeholder/sbs-logo.png',
+  logoUrl: 'https://res.cloudinary.com/wqro8h83/image/upload/v1789034885/Clip_path_group_qmknoq.svg',
 } as const;
 
 export function formatPrice(kobo: number): string {
@@ -63,14 +63,14 @@ export function emailShell(opts: {
           <!-- Header -->
           <tr>
             <td align="center" class="email-card"
-                style="background-color:${BRAND.black};padding:36px 40px 28px;">
-              <img src="${BRAND.logoUrl}" alt="Signature By Sarah" width="130"
+                style="background-color:${BRAND.offWhite};padding:36px 40px 28px;border-bottom:1px solid ${BRAND.gray};">
+              <img src="${BRAND.logoUrl}" alt="Soibi" width="130"
                    style="width:130px;max-width:130px;height:auto;display:block;margin:0 auto 20px;" />
               <p style="margin:0 0 6px 0;font-size:11px;letter-spacing:3px;text-transform:uppercase;color:${BRAND.gold};font-family:Arial,sans-serif;">
-                Signature By Sarah
+                Soibi
               </p>
               <h1 class="header-title"
-                  style="margin:0;font-size:26px;font-weight:400;color:#ffffff;font-family:Georgia,'Times New Roman',serif;letter-spacing:0.5px;">
+                  style="margin:0;font-size:26px;font-weight:400;color:${BRAND.black};font-family:Georgia,'Times New Roman',serif;letter-spacing:0.5px;">
                 ${opts.heading}
               </h1>
               <div style="width:48px;height:2px;background:${BRAND.gold};margin:18px auto 0;"></div>
@@ -102,7 +102,7 @@ export function emailShell(opts: {
             <td align="center"
                 style="padding:24px 40px;background:${BRAND.offWhite};border-top:1px solid ${BRAND.gray};">
               <p style="margin:0 0 4px 0;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:${BRAND.gold};font-family:Arial,sans-serif;">
-                Signature By Sarah
+                Soibi
               </p>
               <p style="margin:0;font-size:11px;color:#aaa;font-family:Arial,sans-serif;">
                 This is an internal notification. Do not reply to this email.

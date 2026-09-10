@@ -82,7 +82,7 @@ export function buildCartSubmissionEmail(data: CartSubmissionEmailData): string 
   `;
 
   return emailShell({
-    title: 'New Cart Submission — Signature By Sarah',
+    title: 'New Cart Submission — Soibi',
     heading: 'New Cart Submission',
     badgeLabel: 'Customer Cart Order',
     bodyHtml,

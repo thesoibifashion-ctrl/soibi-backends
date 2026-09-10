@@ -1,4 +1,4 @@
-// Customer-facing email templates for SBS.
+// Customer-facing email templates for Soibi.
 // These are sent to the customer, not to the admin.
 
 import {
@@ -120,7 +120,7 @@ export function buildCustomerQuoteEmail(data: CustomerQuoteEmailData): string {
   `;
 
   return customerEmailShell({
-    title: 'Quote Received — Signature By Sarah',
+    title: 'Quote Received — Soibi',
     heading: 'Quote Received',
     badgeLabel: data.isGuest ? 'Guest Quote' : 'Your Quote',
     bodyHtml,
@@ -177,7 +177,7 @@ export function buildCustomerCartEmail(data: CustomerCartEmailData): string {
   `;
 
   return customerEmailShell({
-    title: 'Order Received — Signature By Sarah',
+    title: 'Order Received — Soibi',
     heading: 'Order Received',
     badgeLabel: 'Your Order',
     bodyHtml,
@@ -199,7 +199,7 @@ const STATUS_MESSAGES: Record<string, string> = {
   confirmed: 'Congratulations, your order has been confirmed.',
   processing: 'Congratulations, your order is being processed.',
   shipped: 'Congratulations, your order is being shipped.',
-  completed: 'Your order has been completed. Thank you for choosing Signature By Sarah!',
+  completed: 'Your order has been completed. Thank you for choosing Soibi!',
   approved: 'Your quote has been approved. We will be in touch shortly.',
   reviewing: 'Your quote is currently being reviewed by our team.',
   cancelled: 'Your order has been cancelled. Please contact us if you have any questions.',
@@ -231,7 +231,7 @@ export function buildCustomerStatusEmail(data: CustomerStatusEmailData): string 
   `;
 
   return customerEmailShell({
-    title: `${data.orderType} Status Update — Signature By Sarah`,
+    title: `${data.orderType} Status Update — Soibi`,
     heading: `${data.orderType} Update`,
     badgeLabel: `Status: ${data.newStatus}`,
     bodyHtml,
@@ -244,7 +244,7 @@ export function buildCustomerContactEmail(name: string, subject: string | null):
   const bodyHtml = `
     <p style="margin:0 0 24px 0;font-size:15px;color:${BRAND.black};font-family:Arial,sans-serif;line-height:1.6;">
       Hi ${val(name)},<br /><br />
-      Thank you for reaching out to Signature By Sarah. We have received your message
+      Thank you for reaching out to Soibi. We have received your message
       ${subject ? `regarding <strong>${subject}</strong>` : ''} and will get back to you as soon as possible.
     </p>
     <p style="margin:0;font-size:13px;color:#888;font-family:Arial,sans-serif;">
@@ -253,7 +253,7 @@ export function buildCustomerContactEmail(name: string, subject: string | null):
   `;
 
   return customerEmailShell({
-    title: 'Message Received — Signature By Sarah',
+    title: 'Message Received — Soibi',
     heading: 'Message Received',
     badgeLabel: 'Contact Confirmation',
     bodyHtml,
@@ -266,18 +266,18 @@ export function buildCustomerAcademyEmail(fullName: string): string {
   const bodyHtml = `
     <p style="margin:0 0 24px 0;font-size:15px;color:${BRAND.black};font-family:Arial,sans-serif;line-height:1.6;">
       Hi ${val(fullName)},<br /><br />
-      Thank you for applying to the Signature By Sarah Academy. We have received your application
+      Thank you for applying to the Soibi Academy. We have received your application
       and will review it shortly. You will hear from us soon.
     </p>
     <p style="margin:0;font-size:13px;color:#888;font-family:Arial,sans-serif;">
-      We look forward to potentially welcoming you to the SBS Academy family.
+      We look forward to potentially welcoming you to the Soibi Academy family.
     </p>
   `;
 
   return customerEmailShell({
-    title: 'Application Received — SBS Academy',
+    title: 'Application Received — Soibi Academy',
     heading: 'Application Received',
-    badgeLabel: 'SBS Academy',
+    badgeLabel: 'Soibi Academy',
     bodyHtml,
   });
 }

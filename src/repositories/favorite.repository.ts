@@ -33,7 +33,7 @@ function rowToFavorite(row: Record<string, unknown>): Favorite {
       slug: row['slug'] as string,
       description: (row['description'] as string | null) ?? null,
       category: (row['category'] as string | null) ?? null,
-      gender: (row['gender'] as 'male' | 'female' | 'unisex' | null) ?? null,
+      gender: (row['gender'] as string | null) ?? null,
       basePrice: parseFloat(row['base_price'] as string),
       isCustomizable: row['is_customizable'] as boolean,
       isFeatured: row['is_featured'] as boolean,

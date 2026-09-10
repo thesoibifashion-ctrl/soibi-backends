@@ -20,6 +20,7 @@ export interface CartItem {
   customNotes: string | null;
   unitPriceSnapshot: number;
   currency: string | null;
+  pricesSnapshot: ProductPriceSnapshot[] | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -33,6 +34,7 @@ export interface Cart {
   address: string | null;
   paymentUrl: string | null;
   receiptUrl: string | null;
+  selectedCurrency: string | null;
   items: CartItem[];
   createdAt: string;
   updatedAt: string;
@@ -55,6 +57,7 @@ export interface CartHistoryItem {
   customNotes?: string | null;
   unitPriceSnapshot: number;
   currency: string | null;
+  pricesSnapshot?: ProductPriceSnapshot[] | null;
 }
 
 export interface CartOrderStatusHistoryEntry {
@@ -84,6 +87,7 @@ export interface CartHistory {
   items: CartHistoryItem[];
   totalSnapshot: number;
   currency: string | null;
+  selectedCurrency: string | null;
   paymentUrl: string | null;
   receiptUrl: string | null;
   receiptPublicId: string | null;
@@ -119,6 +123,7 @@ export interface AddCartItemInput {
   customNotes?: string | null;
   unitPriceSnapshot: number;
   currency: string;
+  pricesSnapshot?: ProductPriceSnapshot[] | null;
 }
 
 export interface UpdateCartItemInput {
@@ -136,6 +141,7 @@ export interface UpdateCartDetailsInput {
   address?: string | null;
   paymentUrl?: string | null;
   receiptUrl?: string | null;
+  selectedCurrency?: string | null;
 }
 
 export interface CartSubmitResult {
@@ -158,6 +164,15 @@ export interface CartSubmitInput {
   address?: string | null;
   paymentUrl?: string | null;
   receiptUrl?: string | null;
+  selectedCurrency?: string | null;
+}
+
+export interface ProductPriceSnapshot {
+  currencyId: string;
+  currency: string;
+  name: string;
+  symbol: string;
+  amount: number;
 }
 
 export interface UpdateCartOrderStatusInput {

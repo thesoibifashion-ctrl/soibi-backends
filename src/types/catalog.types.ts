@@ -64,7 +64,7 @@ export interface Product {
   slug: string;
   description: string | null;
   category: string | null;
-  gender: 'male' | 'female' | 'unisex' | null;
+  gender: string | null;
   basePrice: number;
   isCustomizable: boolean;
   isFeatured: boolean;

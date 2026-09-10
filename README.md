@@ -1,15 +1,15 @@
-# Signature By Sarah Backend API
+# Soibi Backend API
 
 ## Overview
 
-The Signature By Sarah (SBS) Backend API powers the Signature By Sarah ecommerce platform. It provides product discovery and management, quotes, customer carts and favorites, contact and academy forms, gallery content, and role-protected administration endpoints.
+The Soibi Backend API powers the Soibi ecommerce platform. It provides product discovery and management, quotes, customer carts and favorites, contact and academy forms, gallery and blog content, and role-protected administration endpoints.
 
 The application is built with:
 
 - Node.js and Express
 - TypeScript with strict type checking
 - PostgreSQL hosted by Pxxl Managed PostgreSQL
-- Backend-owned authentication with bcrypt password hashing and signed JWTs
+- Passwordless email-code authentication and signed JWTs
 - A layered REST API architecture: routes, controllers, services, repositories, validators, and middleware
 - Resend for transactional email notifications
 
@@ -20,17 +20,17 @@ All API responses use a consistent JSON envelope with `success`, `message`, and 
 ## Features
 
 - Backend-owned customer, admin, and super-admin accounts and profiles
-- Google OAuth sign-in alongside email/password authentication
+- Google OAuth sign-in alongside passwordless email-code authentication
 - Customer, admin, and super-admin roles
 - Public product, collection, material, color, carousel, and customization catalog APIs
 - Admin product management, images, variants, and collection assignments
 - Public gallery with admin gallery management
 - Guest andz authenticated quote submission with contact preference and email notifications - Contact submissions and admin review
-- SBS Academy registrations and admin review
+- Soibi Academy registrations and admin review
 - Authenticated customer carts with price snapshots, submission lifecycle, and cart history
 - One-time guest cart submissions, stored alongside customer cart orders
 - Authenticated product favorites
-- Internal email notifications to Signature By Sarah on every quote and cart submission
+- Internal email notifications to Soibi on every quote and cart submission
 
 ---
 
@@ -76,6 +76,10 @@ The command uses the existing `DATABASE_URL`, runs migrations from `001` through
 - `016_google_oauth_profiles.sql` — allows passwordless Google-only accounts and stores Google’s immutable subject identifier.
 - `019_guest_cart_submissions.sql` — permits cart-history records without a profile and adds guest name, email, phone, and guest-order indexing fields for one-time guest cart submissions.
 - `020_cart_order_currency.sql` — stores the selected currency code with cart-item and submitted-order price snapshots.
+- `021_email_login_codes.sql` — stores hashed, expiring, single-use email sign-in codes.
+- `022_cart_currency_snapshots.sql` — adds cart and order `selected_currency` plus item `prices_snapshot` fields.
+- `023_product_gender_free_form.sql` — removes the fixed product gender database constraint.
+- `024_blog_posts.sql` — creates the blog-post content table.
 
 ### Production
 
@@ -107,7 +111,7 @@ All variables below are required by the current runtime configuration unless a d
 | `LIVE_URL` | Yes | Additional allowed CORS origin. |
 | `RESEND_API_KEY` | Yes | Resend API key used to send transactional notifications. |
 | `RESEND_FROM_EMAIL` | Yes | A `Display Name <address@verified-domain>` sender accepted by Resend. |
-| `NOTIFICATION_EMAIL` | No (defaults to `signaturebysarah1@gmail.com`) | Recipient address for all internal order and quote notifications. |
+| `NOTIFICATION_EMAIL` | No (defaults to `thesoibifashion@gmail.com`) | Recipient address for all internal order and quote notifications. |
 
 Example:
 
@@ -125,15 +129,15 @@ FRONTEND_URL=http://localhost:3000
 ADMIN_URL=http://localhost:3001
 LIVE_URL=http://localhost:3000
 RESEND_API_KEY=re_...
-RESEND_FROM_EMAIL="Signature By Sarah <orders@example.com>"
-NOTIFICATION_EMAIL=signaturebysarah1@gmail.com
+RESEND_FROM_EMAIL="Soibi <orders@example.com>"
+NOTIFICATION_EMAIL=thesoibifashion@gmail.com
 ```
 
 ---
 
 ## Authentication
 
-Authentication is owned by this backend. Passwords are hashed with `bcryptjs` before storage, and the API signs HS256 JWT access tokens using `JWT_SECRET`. The token subject is the `profiles.id`; every protected request resolves that profile from PostgreSQL, so role and active-account checks are current.
+Authentication is owned by this backend. A six-digit email sign-in code is bcrypt-hashed before storage, expires after 10 minutes, and can be used only once. The API signs HS256 JWT access tokens using `JWT_SECRET`. The token subject is the `profiles.id`; every protected request resolves that profile from PostgreSQL, so role and active-account checks are current.
 
 Protected requests must include:
 
@@ -149,11 +153,11 @@ Roles are:
 | `admin` | Customer access plus all `/api/admin/*` endpoints. |
 | `super_admin` | Same administrative endpoint access as `admin`. |
 
-`POST /api/auth/register` creates a customer account and returns an access token. `POST /api/auth/login` returns an access token for an existing account. `GET /api/auth/me` returns the authenticated profile. Registrations always receive the `customer` role; provision the first administrator directly in PostgreSQL through an approved operational process. Password-reset, refresh-token, email-verification, and Cloudinary upload flows are not implemented in this backend.
+Call `POST /api/auth/request-code` with `{ "email": "customer@example.com" }`, then submit the received code to `POST /api/auth/verify-code` with `{ "email": "customer@example.com", "code": "123456" }`. Verification returns the standard Bearer JWT session response. A profile is created with the `customer` role only after successful verification; existing profiles, including legacy password-based accounts, are matched by email. Requests are limited to one code per email every 60 seconds. `GET /api/auth/me` returns the authenticated profile. Provision the first administrator directly in PostgreSQL through an approved operational process.
 
 ### Google OAuth setup
 
-Google Sign-In is an additional authentication method; email/password registration and login continue to work unchanged. Start the browser flow at `GET /api/auth/google`. Google redirects to `GET /api/auth/google/callback`, which returns the same JWT session response as `POST /api/auth/login`. The frontend must retain that Bearer token in the same way it handles an email/password login. There is no server-side application session to revoke: logout means the client discards its JWT.
+Google Sign-In is an additional authentication method. Start the browser flow at `GET /api/auth/google`. Google redirects to `GET /api/auth/google/callback`, which returns the same JWT session response as `POST /api/auth/verify-code`. The frontend must retain that Bearer token. There is no server-side application session to revoke: logout means the client discards its JWT.
 
 1. In [Google Cloud Console](https://console.cloud.google.com/), create or select a project, configure the OAuth consent screen, then create an **OAuth 2.0 Client ID** for a **Web application**.
 2. Copy its client ID and client secret to `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`; never commit either value.
@@ -161,13 +165,13 @@ Google Sign-In is an additional authentication method; email/password registrati
 4. Generate a separate high-entropy value for `GOOGLE_OAUTH_STATE_SECRET`. The backend uses it only to sign a ten-minute, HTTP-only OAuth state cookie and clears that cookie at the callback.
 5. Apply `016_google_oauth_profiles.sql` once through the Pxxl SQL console or your normal migration process before using Google Sign-In. Do not rerun migrations `001`–`015` on an already-migrated database.
 
-The implementation uses Google’s authorization-code flow with `openid email profile` scopes and accepts only Google accounts whose email is verified. A profile is found by Google subject first, then an existing matching SBS email account is linked; otherwise a new customer profile is created. See Google’s [web-server OAuth guide](https://developers.google.com/identity/protocols/oauth2/web-server) and [OpenID Connect reference](https://developers.google.com/identity/openid-connect/reference) for Cloud configuration details.
+The implementation uses Google’s authorization-code flow with `openid email profile` scopes and accepts only Google accounts whose email is verified. A profile is found by Google subject first, then an existing matching Soibi email account is linked; otherwise a new customer profile is created. See Google’s [web-server OAuth guide](https://developers.google.com/identity/protocols/oauth2/web-server) and [OpenID Connect reference](https://developers.google.com/identity/openid-connect/reference) for Cloud configuration details.
 
 ---
 
 ## Email Notifications
 
-After every successful quote submission and cart submission, the backend sends settings-controlled HTML notifications to Signature By Sarah and to the customer when the respective notification setting is enabled. The customer email is sent to `guestEmail` for guest quotes, to the authenticated account email for customer quotes, and to the authenticated account email for cart submissions.
+After every successful quote submission and cart submission, the backend sends settings-controlled HTML notifications to Soibi and to the customer when the respective notification setting is enabled. The customer email is sent to `guestEmail` for guest quotes, to the authenticated account email for customer quotes, and to the authenticated account email for cart submissions.
 
 Customer emails include the customer name, order/reference number, status, item details, available total, and a tracking link built from `FRONTEND_URL`: `/tracking/quote/:orderNumber` for quotes and `/tracking/cart/:orderNumber` for cart orders. Internal emails retain the customer/contact details, order details, and exact admin dashboard link built from `ADMIN_URL`.
 
@@ -186,7 +190,7 @@ Base URL examples below assume `http://localhost:5001`.
 Authentication labels:
 
 - **Public** — no token required.
-- **Customer token** — any valid authenticated SBS user token.
+- **Customer token** — any valid authenticated Soibi user token.
 - **Admin/Super Admin token** — valid authenticated token with `admin` or `super_admin` role.
 
 ## Health
@@ -200,11 +204,11 @@ Authentication labels:
 
 | Method | Route | Auth | Purpose / usage |
 | --- | --- | --- | --- |
-| `POST` | `/api/auth/register` | Public | Creates a customer account from `email`, `password` (minimum 12 characters), and `fullName`; returns a Bearer access token. |
-| `POST` | `/api/auth/login` | Public | Signs in with `email` and `password`; returns a Bearer access token. |
+| `POST` | `/api/auth/request-code` | Public | Sends a six-digit, single-use sign-in code to `email`; one request per email per 60 seconds. |
+| `POST` | `/api/auth/verify-code` | Public | Verifies `email` and `code`, creates a customer profile if needed, and returns a Bearer access token. |
 | `GET` | `/api/auth/google` | Public | Starts the Google OAuth authorization-code flow. |
 | `GET` | `/api/auth/google/callback` | Public | Validates the OAuth callback and returns the standard Bearer JWT session response. |
-| `GET` | `/api/auth/me` | Customer token | Returns the authenticated SBS profile, including role. |
+| `GET` | `/api/auth/me` | Customer token | Returns the authenticated Soibi profile, including role. |
 
 ## Products
 
@@ -261,7 +265,7 @@ Create a product:
 
 `category` is an optional free-form label (for example, `Shoes`, `Bags`, `Belts`, `Wallets`, or `Accessories`) and is separate from collections. `status` is one of `draft`, `published`, or `archived`. Product updates accept any non-empty subset of the same fields, including `category`.
 
-`gender` is optional and can be `male`, `female`, or `unisex`. Valid product sort values are `newest`, `price_asc`, `price_desc`, `size_asc`, `size_desc`, and `collection_sort`. `size_asc` and `size_desc` order products by their minimum and maximum assigned size respectively; products with no sizes sort last. `collection_sort` orders products by their `sort_order` within the filtered collection. Color filtering uses an exact hex code (for example `%23111111`); `collection` and `material` use their slugs (for example `mens-shoes` and `full-grain-leather`); `size` uses the numeric size value. Material objects in product and material responses include `id`, `name`, and `slug`.
+`gender` is optional and accepts any non-empty free-form string. Valid product sort values are `newest`, `price_asc`, `price_desc`, `size_asc`, `size_desc`, and `collection_sort`. `size_asc` and `size_desc` order products by their minimum and maximum assigned size respectively; products with no sizes sort last. `collection_sort` orders products by their `sort_order` within the filtered collection. Color filtering uses an exact hex code (for example `%23111111`); `collection` and `material` use their slugs (for example `mens-shoes` and `full-grain-leather`); `size` uses the numeric size value. Material objects in product and material responses include `id`, `name`, and `slug`.
 
 `colors`, `materials`, and `sizes` are optional create/update fields. Supplying one replaces that product's corresponding availability list in the same transaction. The API creates or reuses the necessary catalog records; no prior catalog request is needed. Sizes are stored through `sizes` and `product_sizes`, independently of legacy product variants. All product list and detail responses include `colors`, `materials`, and `sizes`; color objects expose both `hex` and `hexCode`.
 
@@ -289,7 +293,7 @@ Create or update a variant. All fields are optional for creation because databas
 {
   "sizeLabel": "42",
   "sizeValue": 42,
-  "sku": "SBS-LOAFER-42-BROWN",
+  "sku": "SOIBI-LOAFER-42-BROWN",
   "priceAdjustment": 5000,
   "colorId": "00000000-0000-0000-0000-000000000000",
   "isAvailable": true,
@@ -393,6 +397,32 @@ Create gallery metadata:
 
 `category` must be `workshop`, `craftsmanship`, or `completed_work`.
 
+## Blog
+
+| Method | Route | Auth | Purpose / usage |
+| --- | --- | --- | --- |
+| `GET` | `/api/blog` | Public | Lists published posts, newest first. |
+| `GET` | `/api/blog/:slug` | Public | Returns one published post by slug. |
+| `GET` | `/api/admin/blog` | Admin/Super Admin token | Lists all posts, including drafts. |
+| `POST` | `/api/admin/blog` | Admin/Super Admin token | Creates a post. |
+| `PATCH` | `/api/admin/blog/:id` | Admin/Super Admin token | Partially updates a post. |
+| `DELETE` | `/api/admin/blog/:id` | Admin/Super Admin token | Deletes a post. |
+
+Create a blog post:
+
+```json
+{
+  "title": "The Art of the Perfect Fit",
+  "slug": "the-art-of-the-perfect-fit",
+  "excerpt": "How thoughtful details shape a lasting wardrobe.",
+  "content": "Full post body...",
+  "coverImageUrl": "https://images.example.com/blog/perfect-fit.jpg",
+  "status": "published"
+}
+```
+
+`title`, `slug`, and `content` are required. `excerpt`, `coverImageUrl`, and `publishedAt` are optional. `status` is `draft` or `published`; publishing without a `publishedAt` value timestamps the post automatically. Cover images are uploaded by the frontend and stored as URL strings only.
+
 ## Contact
 
 | Method | Route | Auth | Purpose / usage |
@@ -419,7 +449,7 @@ Submit a contact form:
 
 | Method | Route | Auth | Purpose / usage |
 | --- | --- | --- | --- |
-| `POST` | `/api/academy/register` | Public | Submits an SBS Academy application. |
+| `POST` | `/api/academy/register` | Public | Submits a Soibi Academy application. |
 | `GET` | `/api/admin/academy/applications` | Admin/Super Admin token | Returns all applications, newest first. |
 | `GET` | `/api/admin/academy/applications/:id` | Admin/Super Admin token | Returns one application. |
 
@@ -510,7 +540,7 @@ For guest quotes, `contactMethod` is not required. The guest's phone is taken fr
 }
 ```
 
-`guestName`, `guestEmail`, and `guestPhone` are used as the contact details in the internal notification email sent to Signature By Sarah.
+`guestName`, `guestEmail`, and `guestPhone` are used as the contact details in the internal notification email sent to Soibi.
 
 ### Quote item fields
 
@@ -611,7 +641,7 @@ Valid admin status transitions:
 
 ### Quote email notification
 
-After every quote submission — guest or authenticated — the existing internal notification email is sent to Signature By Sarah, and the customer confirmation email is sent when `notify_customer_on_quote` is enabled. The customer email includes the quote reference, current status, submitted items, available estimated total, and a `FRONTEND_URL/tracking/quote/:orderNumber` link. The internal email includes:
+After every quote submission — guest or authenticated — the existing internal notification email is sent to Soibi, and the customer confirmation email is sent when `notify_customer_on_quote` is enabled. The customer email includes the quote reference, current status, submitted items, available estimated total, and a `FRONTEND_URL/tracking/quote/:orderNumber` link. The internal email includes:
 
 - Customer name, email, phone, and preferred contact method
 - Quote reference number and status
@@ -644,11 +674,12 @@ Each `cart_items` row stores the complete state of the item at the time it was a
 - `product_name_snapshot` — the product name as it appeared when added
 - `image_url_snapshot` — the product image URL at time of adding
 - `unit_price_snapshot` — the price at time of adding
-- `currency` — the three-letter code from the existing active admin-managed currency catalogue (for example `NGN`, `USD`, `GBP`, or `EUR`)
+- `currency` — the flattened three-letter code selected when the item was added, from the active admin-managed currency catalogue (for example `NGN`, `USD`, `GBP`, or `EUR`)
+- `prices_snapshot` — the complete active product `prices` array at the time of adding, retaining every available currency price
 - `selected_color`, `selected_material`, `selected_size` — the customer's chosen options
 - `custom_measurements` — an optional JSONB object of product-defined measurement values
 
-These snapshots are the source of truth for displaying the cart. If a product is later renamed, repriced, or deleted, the cart item still shows what the customer originally selected. `product_id` is nullable to support fully custom items with no catalogue record. `unitPriceSnapshot` and `totalSnapshot` remain JSON numbers; currency is returned separately as a code.
+These snapshots are the source of truth for displaying the cart. If a product is later renamed, repriced, or deleted, the cart item still shows what the customer originally selected. `product_id` is nullable to support fully custom items with no catalogue record. `unitPriceSnapshot` and `totalSnapshot` remain JSON numbers; currency is returned separately as a code. The cart itself also returns nullable `selectedCurrency`, which the frontend may use with each item's `pricesSnapshot` to resolve display prices without backend conversion or enforcement.
 
 ### Endpoints
 
@@ -677,6 +708,10 @@ The frontend sends the complete item snapshot. The backend does not look up prod
   "selectedMaterial": "Full Grain Leather",
   "unitPriceSnapshot": 85000,
   "currency": "NGN",
+  "pricesSnapshot": [
+    { "currencyId": "00000000-0000-0000-0000-000000000001", "currency": "NGN", "name": "Nigerian Naira", "symbol": "₦", "amount": 85000 },
+    { "currencyId": "00000000-0000-0000-0000-000000000002", "currency": "USD", "name": "US Dollar", "symbol": "$", "amount": 55 }
+  ],
   "customMeasurements": {
     "footLength": "10.5",
     "footWidth": "4.2"
@@ -684,7 +719,7 @@ The frontend sends the complete item snapshot. The backend does not look up prod
 }
 ```
 
-`productId` is optional and nullable. All snapshot fields except `quantity`, `unitPriceSnapshot`, and `currency` are optional. `currency` must be an active code from the existing admin-managed currency catalogue. `customMeasurements` accepts a dynamic JSON object or `null`; its keys are not hard-coded. Duplicate detection matches on `productId`, `selectedSize`, `selectedColor`, `selectedMaterial`, `customMeasurements`, and `currency`; a match increases quantity instead of inserting a new row. A cart may contain items in different currencies.
+`productId` is optional and nullable. All snapshot fields except `quantity`, `unitPriceSnapshot`, and `currency` are optional. `currency` must be an active code from the existing admin-managed currency catalogue. `pricesSnapshot` may contain the full product price objects (`currencyId`, `currency`, `name`, `symbol`, `amount`) and is preserved unchanged. `customMeasurements` accepts a dynamic JSON object or `null`; its keys are not hard-coded. Duplicate detection matches on `productId`, `selectedSize`, `selectedColor`, `selectedMaterial`, `customMeasurements`, and `currency`; a match increases quantity instead of inserting a new row. A cart may contain items in different currencies.
 
 ### Update a cart item
 
@@ -704,6 +739,14 @@ At least one field must be provided.
 ```
 
 Set `customMeasurements` to `null` to remove saved measurements from an item.
+
+### Select a cart currency
+
+`PATCH /api/cart` accepts `selectedCurrency` alongside delivery and payment fields. It is optional and nullable; the backend stores it on the cart but does not require every item to have a price in that currency.
+
+```json
+{ "selectedCurrency": "NGN" }
+```
 
 ### Submit the cart
 
@@ -736,7 +779,7 @@ Submit with WhatsApp using the phone number already saved on the profile:
 
 `contactMethod` is required. `phoneNumber` is optional. For authenticated submissions, when `whatsapp` is selected and `phoneNumber` is provided, the number is saved to the customer's profile for future submissions. When `whatsapp` is selected and no `phoneNumber` is provided, the phone already saved on the profile is used. If no phone exists anywhere, the request is rejected with a `400` error.
 
-For a guest submission, include `items` (at least one item), plus any available guest and delivery details. `guestName`, `guestEmail`, `guestPhone`, `state`, `city`, `address`, `paymentUrl`, and `receiptUrl` are accepted. `guestEmail` enables the customer confirmation email when `notify_customer_on_cart` is enabled.
+For a guest submission, include `items` (at least one item), plus any available guest and delivery details. `guestName`, `guestEmail`, `guestPhone`, `state`, `city`, `address`, `paymentUrl`, `receiptUrl`, and `selectedCurrency` are accepted. Include `pricesSnapshot` per item when available; both it and `selectedCurrency` are retained in the resulting order history. `guestEmail` enables the customer confirmation email when `notify_customer_on_cart` is enabled.
 
 ```json
 {
@@ -772,7 +815,7 @@ Response:
   "data": {
     "submittedCartId": "00000000-0000-0000-0000-000000000000",
     "historyId": "00000000-0000-0000-0000-000000000001",
-    "orderNumber": "SBS-2026-C00001",
+    "orderNumber": "SOIBI-2026-C00001",
     "newActiveCartId": "00000000-0000-0000-0000-000000000002"
   }
 }
@@ -809,7 +852,7 @@ Transaction begins:
   6. New empty active cart created
 Transaction committed
         ↓
-Internal notification email sent to Signature By Sarah (fire-and-forget)
+Internal notification email sent to Soibi (fire-and-forget)
         ↓
 Customer immediately has a new empty active cart
 ```
@@ -847,7 +890,7 @@ Customer immediately has a new empty active cart
 
 ### Cart email notification
 
-After every successful cart submission, the existing internal notification email is sent to Signature By Sarah and the customer confirmation email is sent when `notify_customer_on_cart` is enabled. For authenticated orders, the customer email goes to the account email; for guest orders, it goes to `guestEmail` when supplied. The customer email includes the order number, current status, cart item snapshots, total, and a `FRONTEND_URL/tracking/cart/:orderNumber` link. The internal email includes the customer's name, email, phone, preferred contact method, all cart items with snapshots, the order total, and an `ADMIN_URL` dashboard link. Delivery is non-blocking and cannot undo the submitted cart.
+After every successful cart submission, the existing internal notification email is sent to Soibi and the customer confirmation email is sent when `notify_customer_on_cart` is enabled. For authenticated orders, the customer email goes to the account email; for guest orders, it goes to `guestEmail` when supplied. The customer email includes the order number, current status, cart item snapshots, total, and a `FRONTEND_URL/tracking/cart/:orderNumber` link. The internal email includes the customer's name, email, phone, preferred contact method, all cart items with snapshots, the order total, and an `ADMIN_URL` dashboard link. Delivery is non-blocking and cannot undo the submitted cart.
 
 ## Order administration, tracking, payments, and notifications
 
@@ -1020,6 +1063,8 @@ Public product responses, including product lists, featured products, collection
 ```
 
 If a product has no stored price for the currency selected by a client, its `prices` array simply has no matching `currencyId`; the client must treat that currency as unavailable for that product. The API does not fall back to, derive, or convert another price. The default currency identifies the admin-selected primary currency, but does not create missing product prices or alter `basePrice`.
+
+When a product is added to a cart, the frontend may send that complete `prices` array as `pricesSnapshot`. The API stores it unchanged on the item and returns it with every cart or order item. Active carts also have nullable `selectedCurrency`, updated through `PATCH /api/cart`; guest submissions accept the same field and preserve it in order history. Price resolution for an item's selected cart currency is deliberately a frontend concern—this backend neither converts currencies nor requires every item to support the cart currency.
 
 ## Reusable product measurements
 

@@ -26,7 +26,7 @@ export const env = {
 
   resendApiKey: requireEnv('RESEND_API_KEY'),
   resendFromEmail: requireEnv('RESEND_FROM_EMAIL'),
-  notificationEmail: process.env['NOTIFICATION_EMAIL'] ?? 'signaturebysarah1@gmail.com',
+  notificationEmail: process.env['NOTIFICATION_EMAIL'] ?? 'thesoibifashion@gmail.com',
 
   get isProduction() {
     return this.nodeEnv === 'production';

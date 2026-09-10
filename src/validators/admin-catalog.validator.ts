@@ -9,7 +9,7 @@ const productFields = {
   slug: z.string().trim().min(1, 'slug must not be empty').max(255).nullable().optional(),
   description: z.string().trim().max(10_000).nullable().optional(),
   category: z.string().trim().max(100).nullable().optional(),
-  gender: z.enum(['male', 'female', 'unisex']).nullable().optional(),
+  gender: z.string().trim().min(1, 'gender must not be empty').max(20).nullable().optional(),
   basePrice: z.number().min(0, 'basePrice must be >= 0').nullable().optional(),
   isCustomizable: z.boolean().nullable().optional(),
   status: catalogStatusSchema.optional(),

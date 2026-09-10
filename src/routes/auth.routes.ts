@@ -4,14 +4,14 @@ import {
   beginGoogleOAuth,
   completeGoogleOAuth,
   getMe,
-  login,
-  register,
+  requestCode,
+  verifyCode,
 } from '../controllers/auth.controller.js';
 
 const router = Router();
 
-router.post('/register', register);
-router.post('/login', login);
+router.post('/request-code', requestCode);
+router.post('/verify-code', verifyCode);
 router.get('/google', beginGoogleOAuth);
 router.get('/google/callback', completeGoogleOAuth);
 router.get('/me', requireAuth, getMe);

@@ -43,7 +43,7 @@ export function buildAdminContactEmail(data: {
   `;
 
   return emailShell({
-    title: 'New Contact Submission — Signature By Sarah',
+    title: 'New Contact Submission — Soibi',
     heading: 'New Contact Message',
     badgeLabel: 'Contact Form',
     bodyHtml,
@@ -95,9 +95,9 @@ export function buildAdminAcademyEmail(data: {
   `;
 
   return emailShell({
-    title: 'New Academy Application — Signature By Sarah',
+    title: 'New Academy Application — Soibi',
     heading: 'New Academy Application',
-    badgeLabel: 'SBS Academy',
+    badgeLabel: 'Soibi Academy',
     bodyHtml,
   });
 }

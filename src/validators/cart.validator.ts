@@ -1,5 +1,13 @@
 import { z } from 'zod';
 
+const priceSnapshotSchema = z.object({
+  currencyId: z.string().uuid('pricesSnapshot currencyId must be a valid UUID'),
+  currency: z.string().trim().regex(/^[A-Za-z]{3}$/, 'pricesSnapshot currency must be a three-letter code').transform((value) => value.toUpperCase()),
+  name: z.string().trim().min(1).max(255),
+  symbol: z.string().trim().min(1).max(20),
+  amount: z.number().min(0, 'pricesSnapshot amount must be >= 0'),
+});
+
 export const addCartItemSchema = z.object({
   productId: z.string().uuid('productId must be a valid UUID').nullable().optional(),
   variantId: z.string().uuid('variantId must be a valid UUID').nullable().optional(),
@@ -17,6 +25,7 @@ export const addCartItemSchema = z.object({
   customNotes: z.string().trim().max(10_000).nullable().optional(),
   unitPriceSnapshot: z.number().min(0, 'unitPriceSnapshot must be >= 0'),
   currency: z.string().trim().regex(/^[A-Za-z]{3}$/, 'currency must be a three-letter code').transform((value) => value.toUpperCase()),
+  pricesSnapshot: z.array(priceSnapshotSchema).max(100).nullable().optional(),
 });
 
 export const updateCartItemSchema = z
@@ -44,6 +53,7 @@ export const updateCartDetailsSchema = z.object({
   address: z.string().trim().max(2000).nullable().optional(),
   paymentUrl: z.string().url('paymentUrl must be a valid URL').nullable().optional(),
   receiptUrl: z.string().url('receiptUrl must be a valid URL').nullable().optional(),
+  selectedCurrency: z.string().trim().regex(/^[A-Za-z]{3}$/, 'selectedCurrency must be a three-letter code').transform((value) => value.toUpperCase()).nullable().optional(),
 }).refine((d) => Object.values(d).some((value) => value !== undefined), 'At least one cart field must be provided');
 
 export const updateCartOrderStatusSchema = z.object({
@@ -97,4 +107,5 @@ export const submitCartSchema = z.object({
   address: z.string().trim().max(2000).nullable().optional(),
   paymentUrl: z.string().url('paymentUrl must be a valid URL').nullable().optional(),
   receiptUrl: z.string().url('receiptUrl must be a valid URL').nullable().optional(),
+  selectedCurrency: z.string().trim().regex(/^[A-Za-z]{3}$/, 'selectedCurrency must be a three-letter code').transform((value) => value.toUpperCase()).nullable().optional(),
 });

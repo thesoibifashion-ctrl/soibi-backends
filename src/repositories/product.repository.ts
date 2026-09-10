@@ -30,7 +30,7 @@ export interface ProductFilter {
   color?: string;
   collection?: string;
   category?: string;
-  gender?: 'male' | 'female' | 'unisex';
+  gender?: string;
   size?: string;
   material?: string;
   sort?: 'newest' | 'price_asc' | 'price_desc' | 'size_asc' | 'size_desc' | 'collection_sort';

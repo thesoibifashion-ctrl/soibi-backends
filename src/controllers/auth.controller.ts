@@ -2,16 +2,18 @@ import type { Response, NextFunction, Request } from 'express';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import type { AuthenticatedRequest, MaybeAuthenticatedRequest } from '../types/api.types.js';
 import { HttpStatus } from '../types/api.types.js';
-import { registerSchema, loginSchema } from '../validators/auth.validator.js';
+import { requestCodeSchema, verifyCodeSchema } from '../validators/auth.validator.js';
 import {
   getGoogleAuthorizationUrl,
-  loginUser,
   loginWithGoogleAuthorizationCode,
-  registerUser,
+  requestEmailLoginCode,
+  verifyEmailLoginCode,
 } from '../services/auth.service.js';
 import { AppError } from '../utils/AppError.js';
 import { sendSuccess } from '../utils/response.js';
 import { env } from '../config/env.js';
+import { sendEmail } from '../utils/mailer.js';
+import { buildAuthCodeEmail } from '../utils/authCodeEmail.js';
 
 const GOOGLE_STATE_COOKIE = 'google_oauth_state';
 const googleStateCookieOptions = {
@@ -29,22 +31,23 @@ const clearGoogleStateCookieOptions = {
   path: googleStateCookieOptions.path,
 };
 
-export async function register(req: Request, res: Response, next: NextFunction): Promise<void> {
+export async function requestCode(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const parsed = registerSchema.safeParse(req.body);
+    const parsed = requestCodeSchema.safeParse(req.body);
     if (!parsed.success) throw AppError.badRequest(parsed.error.issues[0]?.message ?? 'Invalid request body');
-    const session = await registerUser(parsed.data);
-    sendSuccess(res, 'Account created', session, HttpStatus.CREATED);
+    const code = await requestEmailLoginCode(parsed.data.email);
+    await sendEmail({ to: parsed.data.email, subject: 'Your Soibi sign-in code', html: buildAuthCodeEmail(code) });
+    sendSuccess(res, 'Sign-in code sent');
   } catch (error) {
     next(error);
   }
 }
 
-export async function login(req: Request, res: Response, next: NextFunction): Promise<void> {
+export async function verifyCode(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const parsed = loginSchema.safeParse(req.body);
+    const parsed = verifyCodeSchema.safeParse(req.body);
     if (!parsed.success) throw AppError.badRequest(parsed.error.issues[0]?.message ?? 'Invalid request body');
-    const session = await loginUser(parsed.data.email, parsed.data.password);
+    const session = await verifyEmailLoginCode(parsed.data.email, parsed.data.code);
     sendSuccess(res, 'Signed in', session);
   } catch (error) {
     next(error);

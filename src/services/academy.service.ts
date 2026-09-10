@@ -30,12 +30,12 @@ async function sendAcademyEmails(registration: AcademyRegistration): Promise<voi
   const emails: Promise<void>[] = [];
   if (settings.notifyAdminOnAcademy) emails.push(sendEmail({
       to: settings.notificationEmail,
-      subject: 'New Academy Application — Signature By Sarah',
+      subject: 'New Academy Application — Soibi',
       html: buildAdminAcademyEmail(registration),
     }));
   if (settings.notifyCustomerOnAcademy) emails.push(sendEmail({
       to: registration.email,
-      subject: 'Application Received — SBS Academy',
+      subject: 'Application Received — Soibi Academy',
       html: buildCustomerAcademyEmail(registration.fullName),
     }));
   const results = await Promise.allSettled(emails);

@@ -1,0 +1,11 @@
+import { Router } from 'express';
+import { requireAuth, requireRole } from '../middleware/auth.js';
+import { createAdminBlogPost, deleteAdminBlogPost, listAdminBlogPosts, updateAdminBlogPost } from '../controllers/blog.controller.js';
+const router = Router();
+router.use(requireAuth);
+router.use(requireRole('admin', 'super_admin'));
+router.get('/', listAdminBlogPosts);
+router.post('/', createAdminBlogPost);
+router.patch('/:id', updateAdminBlogPost);
+router.delete('/:id', deleteAdminBlogPost);
+export default router;

@@ -20,7 +20,7 @@ export interface CreateProductInput {
   slug?: string | null;
   description?: string | null;
   category?: string | null;
-  gender?: 'male' | 'female' | 'unisex' | null;
+  gender?: string | null;
   basePrice?: number | null;
   isCustomizable?: boolean | null;
   status?: CatalogStatus;
@@ -44,7 +44,7 @@ export interface AdminProduct {
   slug: string | null;
   description: string | null;
   category: string | null;
-  gender: 'male' | 'female' | 'unisex' | null;
+  gender: string | null;
   basePrice: number | null;
   isCustomizable: boolean | null;
   status: CatalogStatus;

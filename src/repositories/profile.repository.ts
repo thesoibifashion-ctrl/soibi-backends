@@ -33,6 +33,15 @@ export async function findProfileCredentialsByEmail(email: string): Promise<Prof
   return { ...rowToAuthUser(row), passwordHash: (row['password_hash'] as string | null) ?? null };
 }
 
+export async function findProfileByEmail(email: string): Promise<AuthUser | null> {
+  const result = await pool.query(
+    `SELECT ${profileFields} FROM profiles WHERE lower(email) = lower($1)`,
+    [email],
+  );
+  if (result.rows.length === 0) return null;
+  return rowToAuthUser(result.rows[0] as Record<string, unknown>);
+}
+
 export async function findProfileByGoogleSubject(googleSubject: string): Promise<AuthUser | null> {
   const result = await pool.query(
     `SELECT ${profileFields} FROM profiles WHERE google_subject = $1`,

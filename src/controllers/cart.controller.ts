@@ -208,6 +208,7 @@ export async function trackMyCartOrder(req: MaybeAuthenticatedRequest, res: Resp
       orderNumber: order.orderNumber, orderType: 'cart', status: order.status,
       statusHistory: (order.statusHistory ?? []).map((entry) => ({ status: entry.newStatus, previousStatus: entry.oldStatus, createdAt: entry.createdAt })),
       submittedAt: order.completedAt, createdAt: order.createdAt, items: order.items, total: order.totalSnapshot, currency: order.currency,
+      selectedCurrency: order.selectedCurrency,
       // A tracking number is the public capability token: expose only the order
       // data needed to track this one order, never contact/address details.
       shippingTrackingNumber: order.shippingTrackingNumber, shippingTrackingUrl: order.shippingTrackingUrl,
