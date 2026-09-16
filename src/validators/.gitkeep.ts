@@ -3,5 +3,6 @@
 //   product.validator.ts
 //   auth.validator.ts
 //
-// All validators will use Zod schemas.
+// All validators wilggl use Zod schemas.
+// export
 export {};
