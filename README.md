@@ -209,6 +209,7 @@ Authentication labels:
 | `GET` | `/api/auth/google` | Public | Starts the Google OAuth authorization-code flow. |
 | `GET` | `/api/auth/google/callback` | Public | Validates the OAuth callback and returns the standard Bearer JWT session response. |
 | `GET` | `/api/auth/me` | Customer token | Returns the authenticated Soibi profile, including role. |
+| `PATCH` | `/api/auth/me` | Customer token | Updates one or more profile contact fields (`fullName`, `phone`, `preferredContactMethod`, `country`, `state`, `city`, `address`). Email and account identifiers are not editable here. |
 
 ## Products
 
@@ -652,6 +653,16 @@ After every quote submission — guest or authenticated — the existing interna
 - A link to the admin quotes panel
 
 The email is fire-and-forget. If it fails, the quote submission is unaffected.
+
+## Mobile receipt upload sessions
+
+The checkout page can create a short-lived session for a mobile receipt upload. The mobile page submits the uploaded receipt URL and public ID, and checkout can poll the session. Sessions expire after 30 minutes.
+
+| Method | Route | Auth | Purpose / usage |
+| --- | --- | --- | --- |
+| `POST` | `/api/checkout/mobile-sessions` | Public | Creates a session from `{ "sessionId": "..." }`, or returns the current status when the session is still active. |
+| `GET` | `/api/checkout/mobile-sessions/:sessionId` | Public | Returns `status`, `receiptUrl`, and `receiptPublicId`; returns 404 for missing or expired sessions. |
+| `PATCH` | `/api/checkout/mobile-sessions/:sessionId` | Public | Stores required `receiptUrl` and `receiptPublicId` and marks the session uploaded; returns 404 for missing or expired sessions. |
 
 ## Cart
 

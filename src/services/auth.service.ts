@@ -9,6 +9,7 @@ import {
   findProfileCredentialsByEmail,
   findProfileByGoogleSubject,
   linkGoogleSubject,
+  updateProfile as updateProfileRecord,
 } from '../repositories/profile.repository.js';
 import { consumeEmailLoginCode, createEmailLoginCode } from '../repositories/email-login-code.repository.js';
 import { AppError } from '../utils/AppError.js';
@@ -160,6 +161,12 @@ export async function resolveUserFromToken(token: string): Promise<AuthUser> {
   const profile = await findProfileById(subject);
   if (!profile) throw AppError.unauthorized('Invalid or expired token');
   if (!profile.isActive) throw AppError.forbidden('Account is disabled');
+  return profile;
+}
+
+export async function updateAuthenticatedProfile(profileId: string, data: Parameters<typeof updateProfileRecord>[1]): Promise<AuthUser> {
+  const profile = await updateProfileRecord(profileId, data);
+  if (!profile) throw AppError.notFound('Profile not found');
   return profile;
 }
 

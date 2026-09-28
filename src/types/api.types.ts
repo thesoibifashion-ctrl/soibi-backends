@@ -22,6 +22,11 @@ export interface AuthUser {
   fullName: string;
   phone: string | null;
   avatarUrl: string | null;
+  preferredContactMethod: 'email' | 'whatsapp' | null;
+  country: string | null;
+  state: string | null;
+  city: string | null;
+  address: string | null;
   role: 'customer' | 'admin' | 'super_admin';
   isActive: boolean;
 }

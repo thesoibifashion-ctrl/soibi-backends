@@ -39,6 +39,8 @@ import currencyRoutes from './routes/currency.routes.js';
 import adminCurrencyRoutes from './routes/admin-currency.routes.js';
 import blogRoutes from './routes/blog.routes.js';
 import adminBlogRoutes from './routes/admin-blog.routes.js';
+import paystackRoutes from './routes/paystack.routes.js';
+import mobileUploadSessionRoutes from './routes/mobile-upload-session.routes.js';
 const app = express();
 
 // ─── Security ─────────────────────────────────────────────────────────────────
@@ -48,6 +50,16 @@ app.get("/", (req, res) => {
     res.json({ message: "server works" });
   });
 // ─── Parsing ──────────────────────────────────────────────────────────────────
+// Webhook route gets its own json parser that captures the raw body Buffer
+// for Paystack HMAC-SHA512 signature verification.
+app.use(
+  '/api/payments/paystack/webhook',
+  express.json({
+    verify: (req: express.Request & { rawBody?: Buffer }, _res, buf) => {
+      req.rawBody = buf;
+    },
+  }),
+);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser(env.googleOAuthStateSecret));
@@ -87,6 +99,8 @@ app.use('/api/admin/settings', adminSettingsRoutes);
 app.use('/api/admin/cart', adminCartRoutes);
 app.use('/api/admin/analytics', adminAnalyticsRoutes);
 app.use('/api/tracking', trackingRoutes);
+app.use('/api/payments/paystack', paystackRoutes);
+app.use('/api/checkout/mobile-sessions', mobileUploadSessionRoutes);
 
 // ─── Error Handling ───────────────────────────────────────────────────────────
 app.use(notFound);

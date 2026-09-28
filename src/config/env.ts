@@ -28,6 +28,8 @@ export const env = {
   resendFromEmail: requireEnv('RESEND_FROM_EMAIL'),
   notificationEmail: process.env['NOTIFICATION_EMAIL'] ?? 'thesoibifashion@gmail.com',
 
+  paystackSecretKey: requireEnv('PAYSTACK_SECRET_KEY'),
+
   get isProduction() {
     return this.nodeEnv === 'production';
   },

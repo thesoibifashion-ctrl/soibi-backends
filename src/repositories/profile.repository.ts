@@ -10,12 +10,17 @@ function rowToAuthUser(row: Record<string, unknown>): AuthUser {
     fullName: row['full_name'] as string,
     phone: (row['phone'] as string | null) ?? null,
     avatarUrl: (row['avatar_url'] as string | null) ?? null,
+    preferredContactMethod: (row['preferred_contact_method'] as AuthUser['preferredContactMethod']) ?? null,
+    country: (row['country'] as string | null) ?? null,
+    state: (row['state'] as string | null) ?? null,
+    city: (row['city'] as string | null) ?? null,
+    address: (row['address'] as string | null) ?? null,
     role: row['role'] as AuthUser['role'],
     isActive: row['is_active'] as boolean,
   };
 }
 
-const profileFields = 'id, email, full_name, phone, avatar_url, role, is_active';
+const profileFields = 'id, email, full_name, phone, avatar_url, preferred_contact_method, country, state, city, address, role, is_active';
 
 export async function findProfileById(id: string): Promise<AuthUser | null> {
   const result = await pool.query(`SELECT ${profileFields} FROM profiles WHERE id = $1`, [id]);
@@ -82,7 +87,7 @@ export async function linkGoogleSubject(profileId: string, googleSubject: string
 
 export async function updateProfile(
   profileId: string,
-  data: Partial<{ fullName: string; phone: string; avatarUrl: string }>,
+  data: Partial<{ fullName: string | null; phone: string | null; avatarUrl: string | null; preferredContactMethod: 'email' | 'whatsapp' | null; country: string | null; state: string | null; city: string | null; address: string | null }>,
 ): Promise<AuthUser | null> {
   const fields: string[] = [];
   const values: unknown[] = [];
@@ -99,6 +104,19 @@ export async function updateProfile(
   if (data.avatarUrl !== undefined) {
     fields.push(`avatar_url = $${idx++}`);
     values.push(data.avatarUrl);
+  }
+  const optionalFields = [
+    ['preferredContactMethod', 'preferred_contact_method'],
+    ['country', 'country'],
+    ['state', 'state'],
+    ['city', 'city'],
+    ['address', 'address'],
+  ] as const;
+  for (const [key, column] of optionalFields) {
+    if (data[key] !== undefined) {
+      fields.push(`${column} = $${idx++}`);
+      values.push(data[key]);
+    }
   }
   if (fields.length === 0) return findProfileById(profileId);
 

@@ -14,6 +14,8 @@ import { sendSuccess } from '../utils/response.js';
 import { env } from '../config/env.js';
 import { sendEmail } from '../utils/mailer.js';
 import { buildAuthCodeEmail } from '../utils/authCodeEmail.js';
+import { updateAuthenticatedProfile } from '../services/auth.service.js';
+import { updateProfileSchema } from '../validators/profile.validator.js';
 
 const GOOGLE_STATE_COOKIE = 'google_oauth_state';
 const googleStateCookieOptions = {
@@ -90,6 +92,17 @@ export function getMe(req: MaybeAuthenticatedRequest, res: Response): void {
   // req.user is guaranteed by requireAuth — assert non-null.
   const user = req.user as AuthenticatedRequest['user'];
   sendSuccess(res, 'Profile retrieved', user);
+}
+
+export async function patchMe(req: MaybeAuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const parsed = updateProfileSchema.safeParse(req.body);
+    if (!parsed.success) throw AppError.badRequest(parsed.error.issues[0]?.message ?? 'Invalid request body');
+    const user = req.user as AuthenticatedRequest['user'];
+    sendSuccess(res, 'Profile updated', await updateAuthenticatedProfile(user.id, parsed.data));
+  } catch (error) {
+    next(error);
+  }
 }
 
 function sameState(state: unknown, cookieState: unknown): boolean {
