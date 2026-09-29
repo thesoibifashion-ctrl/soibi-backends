@@ -28,6 +28,11 @@ export async function findPublishedBlogPostBySlug(slug: string): Promise<BlogPos
   return result.rows.length ? rowToBlogPost(result.rows[0] as Record<string, unknown>) : null;
 }
 
+export async function findBlogPostById(id: string): Promise<BlogPost | null> {
+  const result = await pool.query(`SELECT ${fields} FROM blog_posts WHERE id = $1`, [id]);
+  return result.rows.length ? rowToBlogPost(result.rows[0] as Record<string, unknown>) : null;
+}
+
 export async function findAllBlogPosts(): Promise<BlogPost[]> {
   const result = await pool.query(`SELECT ${fields} FROM blog_posts ORDER BY created_at DESC`);
   return (result.rows as Record<string, unknown>[]).map(rowToBlogPost);
@@ -35,11 +40,12 @@ export async function findAllBlogPosts(): Promise<BlogPost[]> {
 
 export async function createBlogPost(input: CreateBlogPostInput): Promise<BlogPost> {
   const status = input.status ?? 'draft';
+  const publishedAt = input.publishedAt ?? (status === 'published' ? new Date().toISOString() : null);
   const result = await pool.query(
     `INSERT INTO blog_posts (title, slug, excerpt, content, cover_image_url, status, published_at)
-     VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, CASE WHEN $6 = 'published' THEN now() ELSE NULL END))
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
      RETURNING ${fields}`,
-    [input.title, input.slug, input.excerpt ?? null, input.content, input.coverImageUrl ?? null, status, input.publishedAt ?? null],
+    [input.title, input.slug, input.excerpt ?? null, input.content, input.coverImageUrl ?? null, status, publishedAt],
   );
   return rowToBlogPost(result.rows[0] as Record<string, unknown>);
 }

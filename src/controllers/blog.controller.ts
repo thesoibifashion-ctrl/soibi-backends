@@ -3,7 +3,7 @@ import { HttpStatus } from '../types/api.types.js';
 import { AppError } from '../utils/AppError.js';
 import { sendSuccess } from '../utils/response.js';
 import { createBlogPostSchema, updateBlogPostSchema } from '../validators/blog.validator.js';
-import { createManagedBlogPost, getAllManagedBlogPosts, getPublishedBlogPost, getPublishedBlogPosts, removeManagedBlogPost, updateManagedBlogPost } from '../services/blog.service.js';
+import { createManagedBlogPost, getAllManagedBlogPosts, getManagedBlogPostById, getPublishedBlogPost, getPublishedBlogPosts, removeManagedBlogPost, updateManagedBlogPost } from '../services/blog.service.js';
 
 export async function listBlogPosts(_req: Request, res: Response, next: NextFunction): Promise<void> {
   try { sendSuccess(res, 'Blog posts retrieved', await getPublishedBlogPosts()); } catch (error) { next(error); }
@@ -13,6 +13,9 @@ export async function getBlogPost(req: Request, res: Response, next: NextFunctio
 }
 export async function listAdminBlogPosts(_req: Request, res: Response, next: NextFunction): Promise<void> {
   try { sendSuccess(res, 'Blog posts retrieved', await getAllManagedBlogPosts()); } catch (error) { next(error); }
+}
+export async function getAdminBlogPostById(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try { sendSuccess(res, 'Blog post retrieved', await getManagedBlogPostById(req.params['id'] as string)); } catch (error) { next(error); }
 }
 export async function createAdminBlogPost(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {

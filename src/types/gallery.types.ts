@@ -1,4 +1,4 @@
-export type GalleryCategory = 'workshop' | 'craftsmanship' | 'completed_work';
+export type GalleryCategory = string;
 
 export interface GalleryImage {
   id: string;

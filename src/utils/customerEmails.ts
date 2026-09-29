@@ -86,6 +86,71 @@ function itemSummaryBlock(items: Array<QuoteItem | CartHistoryItem>): string {
   </table>`;
 }
 
+function customerOrderItemsBlock(items: CartHistoryItem[]): string {
+  if (items.length === 0) return '';
+  const itemCount = items.reduce((count, item) => count + item.quantity, 0);
+  const rows = items.map((item, index) => {
+    const name = val(item.productNameSnapshot, 'Custom Item');
+    const image = item.imageUrlSnapshot
+      ? `<img src="${item.imageUrlSnapshot}" alt="${name}" width="112" height="112" style="display:block;width:112px;height:112px;object-fit:cover;border:1px solid ${BRAND.gray};border-radius:4px;background:${BRAND.offWhite};" />`
+      : `<table width="112" height="112" cellpadding="0" cellspacing="0" border="0" style="width:112px;height:112px;background:${BRAND.offWhite};border:1px solid ${BRAND.gray};border-radius:4px;"><tr><td align="center" style="font:11px Arial,sans-serif;color:#999;">Image unavailable</td></tr></table>`;
+    const formatCartPrice = (amount: number) => item.currency
+      ? `${item.currency} ${amount.toLocaleString('en-NG')}`
+      : formatPrice(amount);
+    const variant = [
+      item.selectedSize != null ? `Size ${val(item.selectedSize)}` : null,
+      item.selectedColor,
+      item.selectedMaterial,
+    ].filter(Boolean).map((value) => val(value)).join(' &nbsp;·&nbsp; ');
+
+    return `<tr>
+      <td style="padding:${index === 0 ? '18px' : '18px'} 0;border-top:1px solid ${BRAND.gray};">
+        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;">
+          <tr>
+            <td width="128" valign="top" style="width:128px;padding:0 16px 0 0;vertical-align:top;">${image}</td>
+            <td valign="top" style="vertical-align:top;padding:2px 0;">
+              <p style="margin:0 0 8px;font:600 16px/1.4 Georgia,'Times New Roman',serif;color:${BRAND.black};">${name}</p>
+              ${variant ? `<p style="margin:0 0 10px;font:12px/1.5 Arial,Helvetica,sans-serif;color:#777;">${variant}</p>` : ''}
+              <p style="margin:0;font:12px/1.5 Arial,Helvetica,sans-serif;color:#777;">Quantity: <span style="color:${BRAND.black};font-weight:600;">${item.quantity}</span></p>
+              <p style="margin:8px 0 0;font:13px/1.5 Arial,Helvetica,sans-serif;color:${BRAND.black};font-weight:600;">${formatCartPrice(item.unitPriceSnapshot)}${item.quantity > 1 ? ` <span style="font-weight:400;color:#888;">each</span>` : ''}</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>`;
+  }).join('');
+
+  return `
+    <h2 style="margin:0 0 12px;font:400 13px Arial,Helvetica,sans-serif;letter-spacing:2px;text-transform:uppercase;color:#777;">Your Items <span style="letter-spacing:0;color:#999;">(${itemCount})</span></h2>
+    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;margin:0 0 28px;border:1px solid ${BRAND.gray};background:#fff;">
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+function customerOrderSummaryBlock(opts: {
+  orderNumber: string;
+  status: string;
+  submittedAt: string;
+  trackingUrl: string;
+}): string {
+  const date = new Date(opts.submittedAt).toLocaleDateString('en-GB', {
+    day: 'numeric', month: 'long', year: 'numeric',
+  });
+  return `
+    <h2 style="margin:0 0 12px;font:400 13px Arial,Helvetica,sans-serif;letter-spacing:2px;text-transform:uppercase;color:#777;">Order Summary</h2>
+    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;margin:0 0 22px;background:${BRAND.offWhite};border:1px solid ${BRAND.gray};">
+      <tr><td style="padding:18px 20px;">
+        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;">
+          ${metaRow('Order reference', opts.orderNumber, true)}
+          ${metaRow('Status', opts.status)}
+          ${metaRow('Date placed', date)}
+        </table>
+      </td></tr>
+    </table>
+    ${ctaButton(opts.trackingUrl, 'Track Your Order')}
+    <div style="height:28px;line-height:28px;">&nbsp;</div>`;
+}
+
 // ─── Quote confirmation (customer) ────────────────────────────────────────────
 
 export interface CustomerQuoteEmailData {
@@ -144,19 +209,17 @@ export function buildCustomerCartEmail(data: CustomerCartEmailData): string {
   const trackingUrl = `${env.frontendUrl}/tracking/${encodeURIComponent(data.orderNumber)}`;
 
   const bodyHtml = `
-    <p style="margin:0 0 24px 0;font-size:15px;color:${BRAND.black};font-family:Arial,sans-serif;line-height:1.6;">
+    <p style="margin:0 0 24px;font:15px/1.7 Arial,Helvetica,sans-serif;color:${BRAND.black};">
       Hi ${val(data.customerName)},<br /><br />
-      Thank you for your order. We have received it and will be in touch shortly.
+      Thank you for choosing Soibi Fashion. Your order has been received, and our team will be in touch shortly.
     </p>
-    ${orderSummaryBlock({
+    ${customerOrderSummaryBlock({
       orderNumber: data.orderNumber,
-      orderType: 'Order',
       status: data.status,
       submittedAt: data.submittedAt,
-      notes: null,
       trackingUrl,
     })}
-    ${itemSummaryBlock(data.items)}
+    ${customerOrderItemsBlock(data.items)}
     <table width="100%" cellpadding="0" cellspacing="0" border="0"
            style="border-collapse:collapse;margin-top:8px;margin-bottom:32px;">
       <tr>
@@ -177,8 +240,8 @@ export function buildCustomerCartEmail(data: CustomerCartEmailData): string {
   `;
 
   return customerEmailShell({
-    title: 'Order Received — Soibi',
-    heading: 'Order Received',
+    title: 'Order Confirmation — Soibi Fashion',
+    heading: 'Order Confirmed',
     badgeLabel: 'Your Order',
     bodyHtml,
   });
