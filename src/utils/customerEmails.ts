@@ -141,7 +141,7 @@ export interface CustomerCartEmailData {
 }
 
 export function buildCustomerCartEmail(data: CustomerCartEmailData): string {
-  const trackingUrl = `${env.frontendUrl}/tracking/cart/${encodeURIComponent(data.orderNumber)}`;
+  const trackingUrl = `${env.frontendUrl}/tracking/${encodeURIComponent(data.orderNumber)}`;
 
   const bodyHtml = `
     <p style="margin:0 0 24px 0;font-size:15px;color:${BRAND.black};font-family:Arial,sans-serif;line-height:1.6;">
