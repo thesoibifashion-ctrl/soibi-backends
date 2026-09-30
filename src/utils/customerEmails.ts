@@ -167,7 +167,7 @@ export interface CustomerQuoteEmailData {
 }
 
 export function buildCustomerQuoteEmail(data: CustomerQuoteEmailData): string {
-  const trackingUrl = `${env.frontendUrl}/tracking/quote/${encodeURIComponent(data.referenceNumber)}`;
+  const trackingUrl = `${env.liveUrl.replace(/\/+$/, '')}/tracking/quote/${encodeURIComponent(data.referenceNumber)}`;
   const total = data.items.reduce((sum, item) => sum + (item.unitPriceSnapshot ?? 0) * item.quantity, 0);
 
   const bodyHtml = `
@@ -209,7 +209,7 @@ export interface CustomerCartEmailData {
 }
 
 export function buildCustomerCartEmail(data: CustomerCartEmailData): string {
-  const trackingUrl = `${env.frontendUrl}/tracking/${encodeURIComponent(data.orderNumber)}`;
+  const trackingUrl = `${env.liveUrl.replace(/\/+$/, '')}/tracking/${encodeURIComponent(data.orderNumber)}`;
 
   const bodyHtml = `
     <p style="margin:0 0 24px;font:15px/1.7 Arial,Helvetica,sans-serif;color:${BRAND.black};">

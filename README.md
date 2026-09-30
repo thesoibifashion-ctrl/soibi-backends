@@ -108,7 +108,7 @@ All variables below are required by the current runtime configuration unless a d
 | `GOOGLE_OAUTH_STATE_SECRET` | Yes | A separate random secret used to sign the short-lived OAuth state cookie. |
 | `FRONTEND_URL` | Yes | Customer storefront origin allowed by CORS and base URL for customer tracking links. Set this to the live storefront URL in production. |
 | `ADMIN_URL` | Yes | Admin dashboard origin allowed by CORS and base URL used for admin dashboard links in notification emails. Set this to the live admin URL in production. |
-| `LIVE_URL` | Yes | Additional allowed CORS origin, typically the customer storefront production URL when `FRONTEND_URL` is local. |
+| `LIVE_URL` | Yes | Live customer storefront URL used as the base for all customer tracking links; also allowed by CORS. Set this to the production storefront URL. |
 | `RESEND_API_KEY` | Yes | Resend API key used to send transactional notifications. |
 | `RESEND_FROM_EMAIL` | Yes | A `Display Name <address@verified-domain>` sender accepted by Resend. |
 | `NOTIFICATION_EMAIL` | No (defaults to `thesoibifashion@gmail.com`) | Recipient address for all internal order and quote notifications. |
@@ -173,7 +173,7 @@ The implementation uses Google’s authorization-code flow with `openid email pr
 
 After every successful quote submission and cart submission, the backend sends settings-controlled HTML notifications to Soibi and to the customer when the respective notification setting is enabled. The customer email is sent to `guestEmail` for guest quotes, to the authenticated account email for customer quotes, and to the authenticated account email for cart submissions.
 
-Customer emails include the customer name, order/reference number, status, item details, available total, and a tracking link built from `FRONTEND_URL`: `/tracking/quote/:orderNumber` for quotes and `/tracking/cart/:orderNumber` for cart orders. Internal emails retain the customer/contact details, order details, and exact admin dashboard link built from `ADMIN_URL`.
+Customer emails include the customer name, order/reference number, status, item details, available total, and a tracking link built from `LIVE_URL`: `/tracking/quote/:orderNumber` for quotes and `/tracking/cart/:orderNumber` for cart orders. Internal emails retain the customer/contact details, order details, and exact admin dashboard link built from `ADMIN_URL`.
 
 Emails are sent through Resend using `RESEND_API_KEY` and a verified `RESEND_FROM_EMAIL` sender. Resend API rejections are logged with recipient and error details. Delivery failures do not affect the API response or roll back an already committed submission.
 
@@ -642,7 +642,7 @@ Valid admin status transitions:
 
 ### Quote email notification
 
-After every quote submission — guest or authenticated — the existing internal notification email is sent to Soibi, and the customer confirmation email is sent when `notify_customer_on_quote` is enabled. The customer email includes the quote reference, current status, submitted items, available estimated total, and a `FRONTEND_URL/tracking/quote/:orderNumber` link. The internal email includes:
+After every quote submission — guest or authenticated — the existing internal notification email is sent to Soibi, and the customer confirmation email is sent when `notify_customer_on_quote` is enabled. The customer email includes the quote reference, current status, submitted items, available estimated total, and a `LIVE_URL/tracking/quote/:orderNumber` link. The internal email includes:
 
 - Customer name, email, phone, and preferred contact method
 - Quote reference number and status
@@ -901,7 +901,7 @@ Customer immediately has a new empty active cart
 
 ### Cart email notification
 
-After every successful cart submission, the existing internal notification email is sent to Soibi and the customer confirmation email is sent when `notify_customer_on_cart` is enabled. For authenticated orders, the customer email goes to the account email; for guest orders, it goes to `guestEmail` when supplied. The customer email includes the order number, current status, cart item snapshots, total, and a `FRONTEND_URL/tracking/cart/:orderNumber` link. The internal email includes the customer's name, email, phone, preferred contact method, all cart items with snapshots, the order total, and an `ADMIN_URL` dashboard link. Delivery is non-blocking and cannot undo the submitted cart.
+After every successful cart submission, the existing internal notification email is sent to Soibi and the customer confirmation email is sent when `notify_customer_on_cart` is enabled. For authenticated orders, the customer email goes to the account email; for guest orders, it goes to `guestEmail` when supplied. The customer email includes the order number, current status, cart item snapshots, total, and a `LIVE_URL/tracking/cart/:orderNumber` link. The internal email includes the customer's name, email, phone, preferred contact method, all cart items with snapshots, the order total, and an `ADMIN_URL` dashboard link. Delivery is non-blocking and cannot undo the submitted cart.
 
 ## Order administration, tracking, payments, and notifications
 
@@ -955,7 +955,7 @@ Both accept `{ "isRead": true }` or `{ "isRead": false }`.
 
 Admin and super-admin users can use `GET /api/admin/settings` and `PATCH /api/admin/settings/:key`. `PATCH` accepts `value` (a string, boolean, or `null`) and/or `valueJson`. Notification keys validate booleans; `notification_email` validates email; keys ending in `_url` validate URLs.
 
-Quote, cart, contact, and academy notifications read the existing notification settings. Database writes complete first; Resend failures are logged and do not roll back a submission or status update. Customer emails link to configured `FRONTEND_URL` tracking pages (`/tracking/quote/:orderNumber` and `/tracking/cart/:orderNumber`), and admin emails use configured `ADMIN_URL` dashboard links.
+Quote, cart, contact, and academy notifications read the existing notification settings. Database writes complete first; Resend failures are logged and do not roll back a submission or status update. Customer emails link to configured `LIVE_URL` tracking pages (`/tracking/quote/:orderNumber` and `/tracking/cart/:orderNumber`), and admin emails use configured `ADMIN_URL` dashboard links.
 
 ## Favorites
 

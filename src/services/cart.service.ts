@@ -270,7 +270,7 @@ export async function changeCartOrderStatus(
   // Send customer status email (fire-and-forget)
   const settings = await getNotificationSettings();
   if (settings.notifyCustomerOnOrderStatus && updatedOrder.customerEmail) {
-    const trackingUrl = `${env.frontendUrl}/tracking/${encodeURIComponent(updatedOrder.orderNumber ?? cartHistoryId)}`;
+    const trackingUrl = `${env.liveUrl.replace(/\/+$/, '')}/tracking/${encodeURIComponent(updatedOrder.orderNumber ?? cartHistoryId)}`;
     const html = buildCustomerStatusEmail({
       customerName: updatedOrder.customerName ?? 'Valued Customer',
       orderNumber: updatedOrder.orderNumber ?? cartHistoryId,
