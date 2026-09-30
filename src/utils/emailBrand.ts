@@ -1,10 +1,12 @@
 // Shared brand constants and HTML helpers for all Soibi notification emails.
 
 export const BRAND = {
-  black: '#0E0E0E',
-  gold: '#C9A227',
-  offWhite: '#F8F6F2',
-  gray: '#EDEAE4',
+  black: '#382B25',
+  brown: '#6B5145',
+  gold: '#A8845D',
+  lavender: '#E2D8E8',
+  offWhite: '#FBF8F3',
+  gray: '#E9E1D8',
   logoUrl: 'https://res.cloudinary.com/wqro8h83/image/upload/v1789034885/Clip_path_group_qmknoq.svg',
 } as const;
 
@@ -41,39 +43,48 @@ export function emailShell(opts: {
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="color-scheme" content="light" />
+  <meta name="supported-color-schemes" content="light" />
   <title>${opts.title}</title>
   <style>
     @media only screen and (max-width: 600px) {
       .email-wrapper { padding: 16px !important; }
       .email-card   { padding: 24px 16px !important; }
       .header-title { font-size: 22px !important; }
+      .product-image { width: 88px !important; height: 88px !important; }
+    }
+    :root { color-scheme: light; supported-color-schemes: light; }
+    @media (prefers-color-scheme: dark) {
+      body, .email-background { background-color: ${BRAND.offWhite} !important; }
+      .email-container { background-color: #ffffff !important; }
+      .email-content { color: ${BRAND.black} !important; }
     }
   </style>
 </head>
-<body style="margin:0;padding:0;background-color:${BRAND.gray};font-family:Arial,Helvetica,sans-serif;">
+<body style="margin:0;padding:0;background-color:${BRAND.offWhite};font-family:Arial,Helvetica,sans-serif;color:${BRAND.black};">
 
   <table width="100%" cellpadding="0" cellspacing="0" border="0"
-         style="background-color:${BRAND.gray};border-collapse:collapse;">
+         class="email-background" style="background-color:${BRAND.offWhite};border-collapse:collapse;">
     <tr>
       <td align="center" class="email-wrapper" style="padding:40px 16px;">
 
         <table width="100%" cellpadding="0" cellspacing="0" border="0"
-               style="max-width:620px;border-collapse:collapse;background:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.08);">
+               class="email-container" style="max-width:620px;border-collapse:collapse;background:#ffffff;border-radius:4px;overflow:hidden;border:1px solid ${BRAND.gray};">
 
           <!-- Header -->
           <tr>
             <td align="center" class="email-card"
-                style="background-color:${BRAND.offWhite};padding:36px 40px 28px;border-bottom:1px solid ${BRAND.gray};">
+                style="background-color:${BRAND.offWhite};padding:40px 40px 32px;border-bottom:1px solid ${BRAND.gray};">
               <img src="${BRAND.logoUrl}" alt="Soibi" width="130"
                    style="width:130px;max-width:130px;height:auto;display:block;margin:0 auto 20px;" />
-              <p style="margin:0 0 6px 0;font-size:11px;letter-spacing:3px;text-transform:uppercase;color:${BRAND.gold};font-family:Arial,sans-serif;">
-                Soibi
+              <p style="margin:0 0 8px;font-size:10px;letter-spacing:4px;text-transform:uppercase;color:${BRAND.brown};font-family:Arial,sans-serif;">
+                THE SOIBI FASHION
               </p>
               <h1 class="header-title"
                   style="margin:0;font-size:26px;font-weight:400;color:${BRAND.black};font-family:Georgia,'Times New Roman',serif;letter-spacing:0.5px;">
                 ${opts.heading}
               </h1>
-              <div style="width:48px;height:2px;background:${BRAND.gold};margin:18px auto 0;"></div>
+              <div style="width:48px;height:2px;background:${BRAND.lavender};margin:18px auto 0;"></div>
             </td>
           </tr>
 
@@ -84,8 +95,8 @@ export function emailShell(opts: {
               <!-- Badge -->
               <table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin-bottom:28px;">
                 <tr>
-                  <td style="background:${BRAND.offWhite};border-left:3px solid ${BRAND.gold};padding:10px 16px;border-radius:0 4px 4px 0;">
-                    <span style="font-size:11px;letter-spacing:2px;text-transform:uppercase;color:${BRAND.gold};font-family:Arial,sans-serif;font-weight:600;">
+                    <td style="background:${BRAND.lavender};border-left:3px solid ${BRAND.brown};padding:10px 16px;border-radius:0 4px 4px 0;">
+                      <span style="font-size:11px;letter-spacing:2px;text-transform:uppercase;color:${BRAND.brown};font-family:Arial,sans-serif;font-weight:600;">
                       ${opts.badgeLabel}
                     </span>
                   </td>
@@ -100,7 +111,7 @@ export function emailShell(opts: {
           <!-- Footer -->
           <tr>
             <td align="center"
-                style="padding:24px 40px;background:${BRAND.offWhite};border-top:1px solid ${BRAND.gray};">
+                style="padding:28px 40px;background:${BRAND.offWhite};border-top:1px solid ${BRAND.gray};">
               <p style="margin:0 0 4px 0;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:${BRAND.gold};font-family:Arial,sans-serif;">
                 Soibi
               </p>

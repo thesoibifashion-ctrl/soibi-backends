@@ -65,6 +65,10 @@ function itemSummaryBlock(items: Array<QuoteItem | CartHistoryItem>): string {
   const rows = items.map((item) => {
     const quoteItem = 'productNameSnapshot' in item ? item : item;
     const name = quoteItem.productNameSnapshot ?? ('shoeNameSnapshot' in quoteItem ? quoteItem.shoeNameSnapshot : null) ?? 'Custom Item';
+    const imageUrl = 'imageUrlSnapshot' in quoteItem ? quoteItem.imageUrlSnapshot : null;
+    const image = imageUrl
+      ? `<img class="product-image" src="${imageUrl}" alt="${name}" width="96" height="96" style="display:block;width:96px;height:96px;object-fit:cover;border:1px solid ${BRAND.gray};background:${BRAND.offWhite};" />`
+      : `<table class="product-image" width="96" height="96" cellpadding="0" cellspacing="0" border="0" style="width:96px;height:96px;background:${BRAND.offWhite};border:1px solid ${BRAND.gray};"><tr><td align="center" style="font:10px Arial,sans-serif;color:#999;">Image unavailable</td></tr></table>`;
     const size = 'size' in quoteItem ? quoteItem.size : quoteItem.selectedSize;
     const color = 'colorNameSnapshot' in quoteItem ? quoteItem.colorNameSnapshot : quoteItem.selectedColor;
     const material = 'materialNameSnapshot' in quoteItem ? quoteItem.materialNameSnapshot : quoteItem.selectedMaterial;
@@ -73,15 +77,14 @@ function itemSummaryBlock(items: Array<QuoteItem | CartHistoryItem>): string {
       ? 'To be confirmed'
       : currency ? `${currency} ${quoteItem.unitPriceSnapshot.toLocaleString('en-NG')}` : formatPrice(quoteItem.unitPriceSnapshot);
     return `<tr>
-      <td style="padding:8px 0;font-family:Arial,sans-serif;color:${BRAND.black};">${val(name)}</td>
-      <td style="padding:8px 0;font-family:Arial,sans-serif;color:#666;text-align:center;">${quoteItem.quantity}</td>
-      <td style="padding:8px 0;font-family:Arial,sans-serif;color:#666;text-align:right;">${price}</td>
-      <td style="padding:8px 0;font-family:Arial,sans-serif;color:#666;text-align:right;">${[size != null ? `Size ${size}` : null, color, material].filter(Boolean).join(' · ')}</td>
+      <td style="padding:14px;border-top:1px solid ${BRAND.gray};" valign="top">${image}</td>
+      <td style="padding:16px 12px;border-top:1px solid ${BRAND.gray};font-family:Georgia,'Times New Roman',serif;color:${BRAND.black};font-size:15px;" valign="top">${val(name)}<br /><span style="font:12px/1.7 Arial,Helvetica,sans-serif;color:#777;">${[size != null ? `Size ${size}` : null, color, material].filter(Boolean).join(' · ')}</span></td>
+      <td style="padding:16px 8px;border-top:1px solid ${BRAND.gray};font:12px Arial,sans-serif;color:#666;text-align:center;" valign="top">Qty ${quoteItem.quantity}</td>
+      <td style="padding:16px 14px;border-top:1px solid ${BRAND.gray};font:12px Arial,sans-serif;color:${BRAND.brown};text-align:right;white-space:nowrap;" valign="top">${price}</td>
     </tr>`;
   }).join('');
   return `<h2 style="margin:0 0 14px 0;font-size:13px;letter-spacing:2px;text-transform:uppercase;color:#888;font-family:Arial,sans-serif;font-weight:400;">Items</h2>
-  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin-bottom:32px;">
-    <thead><tr><th align="left" style="padding-bottom:8px;font-size:11px;color:#888;font-family:Arial,sans-serif;">ITEM</th><th style="padding-bottom:8px;font-size:11px;color:#888;font-family:Arial,sans-serif;">QTY</th><th align="right" style="padding-bottom:8px;font-size:11px;color:#888;font-family:Arial,sans-serif;">PRICE</th><th align="right" style="padding-bottom:8px;font-size:11px;color:#888;font-family:Arial,sans-serif;">DETAILS</th></tr></thead>
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin-bottom:32px;border:1px solid ${BRAND.gray};background:#ffffff;">
     <tbody>${rows}</tbody>
   </table>`;
 }

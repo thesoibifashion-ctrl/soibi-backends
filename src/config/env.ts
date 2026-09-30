@@ -20,7 +20,7 @@ export const env = {
   googleOAuthRedirectUri: requireEnv('GOOGLE_OAUTH_REDIRECT_URI'),
   googleOAuthStateSecret: requireEnv('GOOGLE_OAUTH_STATE_SECRET'),
 
-  frontendUrl: requireEnv('FRONTEND_URL'),
+  frontendUrl: requireEnv('FRONTEND_URL').replace(/\/+$/, ''),
   adminUrl: requireEnv('ADMIN_URL'),
   liveUrl: requireEnv('LIVE_URL'),
 

@@ -106,9 +106,9 @@ All variables below are required by the current runtime configuration unless a d
 | `GOOGLE_CLIENT_SECRET` | Yes | OAuth 2.0 web-client secret from Google Cloud. Keep secret. |
 | `GOOGLE_OAUTH_REDIRECT_URI` | Yes | Exact Google callback URL, for example `http://localhost:5001/api/auth/google/callback`. |
 | `GOOGLE_OAUTH_STATE_SECRET` | Yes | A separate random secret used to sign the short-lived OAuth state cookie. |
-| `FRONTEND_URL` | Yes | Allowed CORS origin and base URL for customer tracking links. |
-| `ADMIN_URL` | Yes | Base URL used for admin dashboard links in notification emails. |
-| `LIVE_URL` | Yes | Additional allowed CORS origin. |
+| `FRONTEND_URL` | Yes | Customer storefront origin allowed by CORS and base URL for customer tracking links. Set this to the live storefront URL in production. |
+| `ADMIN_URL` | Yes | Admin dashboard origin allowed by CORS and base URL used for admin dashboard links in notification emails. Set this to the live admin URL in production. |
+| `LIVE_URL` | Yes | Additional allowed CORS origin, typically the customer storefront production URL when `FRONTEND_URL` is local. |
 | `RESEND_API_KEY` | Yes | Resend API key used to send transactional notifications. |
 | `RESEND_FROM_EMAIL` | Yes | A `Display Name <address@verified-domain>` sender accepted by Resend. |
 | `NOTIFICATION_EMAIL` | No (defaults to `thesoibifashion@gmail.com`) | Recipient address for all internal order and quote notifications. |
@@ -1143,4 +1143,4 @@ Deploy the compiled Node.js service to Pxxl and configure the documented runtime
 
 Set `NODE_ENV=production`. The server uses SSL for PostgreSQL connections in production.
 
-After deployment, use the configured Pxxl URL as the API base URL and set `FRONTEND_URL`, `ADMIN_URL`, and `LIVE_URL` to the allowed frontend origins for CORS.
+After deployment, use the configured Pxxl URL as the API base URL and set `FRONTEND_URL` to the customer storefront live URL, `ADMIN_URL` to the admin dashboard live URL, and `LIVE_URL` to any additional allowed frontend origin. CORS also retains the local storefront (`localhost:3000`, `localhost:5173`) and admin (`localhost:3001`) development origins.
