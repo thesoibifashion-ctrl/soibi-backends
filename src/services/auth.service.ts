@@ -1,6 +1,6 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { randomInt } from 'node:crypto';
+import { createHash, randomBytes, randomInt, randomUUID } from 'node:crypto';
 import { env } from '../config/env.js';
 import {
   createProfile,
@@ -14,6 +14,7 @@ import {
 import { consumeEmailLoginCode, createEmailLoginCode } from '../repositories/email-login-code.repository.js';
 import { AppError } from '../utils/AppError.js';
 import type { AuthUser } from '../types/api.types.js';
+import { createRefreshToken, rotateRefreshToken, revokeRefreshToken } from '../repositories/refresh-token.repository.js';
 
 const OTP_SALT_ROUNDS = 12;
 
@@ -23,6 +24,8 @@ export interface AuthSession {
   expiresIn: string;
   user: AuthUser;
 }
+
+export interface IssuedSession extends AuthSession { refreshToken: string; }
 
 interface GoogleTokenResponse {
   access_token?: unknown;
@@ -36,14 +39,53 @@ interface GoogleUserInfo {
   picture?: unknown;
 }
 
-function createSession(user: AuthUser): AuthSession {
-  const accessToken = jwt.sign({}, env.jwtSecret, {
+function createAccessToken(user: AuthUser): string {
+  return jwt.sign({ role: user.role }, env.jwtSecret, {
     algorithm: 'HS256',
     subject: user.id,
     expiresIn: env.jwtExpiresIn as jwt.SignOptions['expiresIn'],
   });
 
-  return { accessToken, tokenType: 'Bearer', expiresIn: env.jwtExpiresIn, user };
+}
+
+function lifetimeMs(value: string): number {
+  const match = /^(\d+)(s|m|h|d)$/.exec(value);
+  if (!match) throw new Error('Token lifetimes must use an integer followed by s, m, h, or d');
+  const amount = Number(match[1]);
+  const unit = match[2];
+  return amount * (unit === 's' ? 1000 : unit === 'm' ? 60_000 : unit === 'h' ? 3_600_000 : 86_400_000);
+}
+
+function tokenHash(token: string): string { return createHash('sha256').update(token).digest('hex'); }
+
+async function createSession(user: AuthUser): Promise<IssuedSession> {
+  const refreshToken = randomBytes(48).toString('base64url');
+  await createRefreshToken({
+    familyId: randomUUID(), profileId: user.id, tokenHash: tokenHash(refreshToken),
+    expiresAt: new Date(Date.now() + lifetimeMs(env.refreshTokenExpiresIn)),
+  });
+  return { accessToken: createAccessToken(user), tokenType: 'Bearer', expiresIn: env.jwtExpiresIn, user, refreshToken };
+}
+
+export async function rotateSession(refreshToken: string): Promise<IssuedSession> {
+  const replacementToken = randomBytes(48).toString('base64url');
+  const result = await rotateRefreshToken({
+    tokenHash: tokenHash(refreshToken), replacementHash: tokenHash(replacementToken),
+    replacementExpiresAt: new Date(Date.now() + lifetimeMs(env.refreshTokenExpiresIn)),
+  });
+  if (result.status !== 'ok') {
+    throw AppError.unauthorized(result.status === 'expired' ? 'Refresh token expired' : result.status === 'revoked' ? 'Refresh token revoked or reused' : 'Invalid refresh token');
+  }
+  const user = await findProfileById(result.profileId);
+  if (!user || !user.isActive) {
+    await revokeRefreshToken(tokenHash(replacementToken));
+    throw AppError.unauthorized('Session is no longer valid');
+  }
+  return { accessToken: createAccessToken(user), tokenType: 'Bearer', expiresIn: env.jwtExpiresIn, user, refreshToken: replacementToken };
+}
+
+export async function logoutSession(refreshToken?: string): Promise<void> {
+  if (refreshToken) await revokeRefreshToken(tokenHash(refreshToken));
 }
 
 export async function requestEmailLoginCode(email: string): Promise<string> {
@@ -53,7 +95,7 @@ export async function requestEmailLoginCode(email: string): Promise<string> {
   return code;
 }
 
-export async function verifyEmailLoginCode(email: string, code: string): Promise<AuthSession> {
+export async function verifyEmailLoginCode(email: string, code: string): Promise<IssuedSession> {
   const valid = await consumeEmailLoginCode(email, (hash) => bcrypt.compare(code, hash));
   if (!valid) throw AppError.unauthorized('Invalid or expired sign-in code');
 
@@ -87,7 +129,7 @@ export function getGoogleAuthorizationUrl(state: string): string {
   return authorizationUrl.toString();
 }
 
-export async function loginWithGoogleAuthorizationCode(code: string): Promise<AuthSession> {
+export async function loginWithGoogleAuthorizationCode(code: string): Promise<IssuedSession> {
   const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },

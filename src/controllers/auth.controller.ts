@@ -8,6 +8,8 @@ import {
   loginWithGoogleAuthorizationCode,
   requestEmailLoginCode,
   verifyEmailLoginCode,
+  rotateSession,
+  logoutSession,
 } from '../services/auth.service.js';
 import { AppError } from '../utils/AppError.js';
 import { sendSuccess } from '../utils/response.js';
@@ -18,6 +20,29 @@ import { updateAuthenticatedProfile } from '../services/auth.service.js';
 import { updateProfileSchema } from '../validators/profile.validator.js';
 
 const GOOGLE_STATE_COOKIE = 'google_oauth_state';
+export const REFRESH_TOKEN_COOKIE = 'refresh_token';
+const refreshCookieOptions = {
+  httpOnly: true,
+  sameSite: env.refreshCookieSameSite,
+  secure: env.isProduction || env.refreshCookieSameSite === 'none',
+  maxAge: tokenLifetimeMs(env.refreshTokenExpiresIn),
+  path: '/api/auth',
+};
+const clearRefreshCookieOptions = { httpOnly: true, sameSite: env.refreshCookieSameSite, secure: refreshCookieOptions.secure, path: '/api/auth' };
+
+function tokenLifetimeMs(value: string): number {
+  const match = /^(\d+)(s|m|h|d)$/.exec(value);
+  if (!match) throw new Error('Token lifetimes must use an integer followed by s, m, h, or d');
+  const amount = Number(match[1]);
+  const unit = match[2];
+  return amount * (unit === 's' ? 1000 : unit === 'm' ? 60_000 : unit === 'h' ? 3_600_000 : 86_400_000);
+}
+
+function sendSession(res: Response, message: string, session: Awaited<ReturnType<typeof verifyEmailLoginCode>>): void {
+  res.cookie(REFRESH_TOKEN_COOKIE, session.refreshToken, refreshCookieOptions);
+  const { refreshToken: _refreshToken, ...publicSession } = session;
+  sendSuccess(res, message, publicSession);
+}
 const googleStateCookieOptions = {
   httpOnly: true,
   sameSite: 'lax' as const,
@@ -50,7 +75,7 @@ export async function verifyCode(req: Request, res: Response, next: NextFunction
     const parsed = verifyCodeSchema.safeParse(req.body);
     if (!parsed.success) throw AppError.badRequest(parsed.error.issues[0]?.message ?? 'Invalid request body');
     const session = await verifyEmailLoginCode(parsed.data.email, parsed.data.code);
-    sendSuccess(res, 'Signed in', session);
+    sendSession(res, 'Signed in', session);
   } catch (error) {
     next(error);
   }
@@ -82,10 +107,30 @@ export async function completeGoogleOAuth(req: Request, res: Response, next: Nex
     }
 
     const session = await loginWithGoogleAuthorizationCode(code);
-    sendSuccess(res, 'Signed in with Google', session);
+    sendSession(res, 'Signed in with Google', session);
   } catch (error) {
     next(error);
   }
+}
+
+export async function refresh(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const token = req.cookies?.[REFRESH_TOKEN_COOKIE] as unknown;
+    if (typeof token !== 'string' || token.length === 0) throw AppError.unauthorized('Refresh token is required');
+    sendSession(res, 'Session refreshed', await rotateSession(token));
+  } catch (error) {
+    res.clearCookie(REFRESH_TOKEN_COOKIE, clearRefreshCookieOptions);
+    next(error);
+  }
+}
+
+export async function logout(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const token = req.cookies?.[REFRESH_TOKEN_COOKIE] as unknown;
+    if (typeof token === 'string') await logoutSession(token);
+    res.clearCookie(REFRESH_TOKEN_COOKIE, clearRefreshCookieOptions);
+    sendSuccess(res, 'Signed out');
+  } catch (error) { next(error); }
 }
 
 export function getMe(req: MaybeAuthenticatedRequest, res: Response): void {

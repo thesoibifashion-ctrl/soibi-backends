@@ -13,7 +13,9 @@ export const env = {
   databaseUrl: requireEnv('DATABASE_URL'),
   databaseSsl: process.env['DATABASE_SSL'] === 'true',
   jwtSecret: requireEnv('JWT_SECRET'),
-  jwtExpiresIn: process.env['JWT_EXPIRES_IN'] ?? '7d',
+  jwtExpiresIn: process.env['JWT_EXPIRES_IN'] ?? '15m',
+  refreshTokenExpiresIn: process.env['REFRESH_TOKEN_EXPIRES_IN'] ?? '30d',
+  refreshCookieSameSite: (process.env['REFRESH_COOKIE_SAME_SITE'] ?? 'lax') as 'strict' | 'lax' | 'none',
 
   googleClientId: requireEnv('GOOGLE_CLIENT_ID'),
   googleClientSecret: requireEnv('GOOGLE_CLIENT_SECRET'),
