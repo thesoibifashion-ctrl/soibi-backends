@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { optionalAuth } from '../middleware/auth.js';
 import {
+  preparePayment,
   initializePayment,
   verifyPayment,
   paystackWebhook,
@@ -12,6 +13,9 @@ const router = Router();
 // Express parses JSON globally in app.ts, so req.body is already the parsed
 // object — we re-stringify it in the controller for the HMAC check.
 router.post('/webhook', paystackWebhook);
+
+// Prepare a hidden pending order without submitting or clearing the cart.
+router.post('/prepare', optionalAuth, preparePayment);
 
 // Initialize: optionalAuth so both authenticated customers and guests can pay.
 router.post('/initialize', optionalAuth, initializePayment);

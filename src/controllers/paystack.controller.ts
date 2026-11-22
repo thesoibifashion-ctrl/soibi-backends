@@ -5,11 +5,28 @@ import { AppError } from '../utils/AppError.js';
 import { sendSuccess } from '../utils/response.js';
 import { env } from '../config/env.js';
 import { pool } from '../database/pool.js';
+import { preparePaystackOrder } from '../services/cart.service.js';
+import { preparePaystackSchema } from '../validators/cart.validator.js';
 import {
   initializePaystackTransaction,
   verifyPaystackTransaction,
   handlePaystackWebhook,
 } from '../services/paystack.service.js';
+
+export async function preparePayment(
+  req: MaybeAuthenticatedRequest,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const parsed = preparePaystackSchema.safeParse(req.body);
+    if (!parsed.success) throw AppError.badRequest(parsed.error.issues[0]?.message ?? 'Invalid request body');
+    const prepared = await preparePaystackOrder(req.user, parsed.data);
+    sendSuccess(res, 'Paystack payment prepared', prepared);
+  } catch (error) {
+    next(error);
+  }
+}
 
 /**
  * POST /api/payments/paystack/initialize
@@ -39,10 +56,11 @@ export async function initializePayment(
       order_number: string | null;
       currency: string | null;
       selected_currency: string | null;
+      guest_payment_token_hash: string | null;
     }>(
       `SELECT ch.id, ch.profile_id, ch.guest_email, ch.total_snapshot,
               ch.payment_status, ch.paystack_reference, ch.order_number,
-              ch.currency, ch.selected_currency
+              ch.currency, ch.selected_currency, ch.guest_payment_token_hash
        FROM cart_history ch
        WHERE ch.id = $1`,
       [historyId],
@@ -51,9 +69,28 @@ export async function initializePayment(
     if (result.rows.length === 0) throw AppError.notFound('Order not found');
     const order = result.rows[0]!;
 
-    // Prevent re-initializing an already-paid order
+    // Check ownership before returning payment state or attempt details.
+    if (order.profile_id !== null && !req.user) {
+      throw AppError.unauthorized('Authentication is required to pay for this order');
+    }
+    if (order.profile_id !== null && order.profile_id !== req.user?.id) {
+      throw AppError.forbidden('You do not have access to this order');
+    }
+    if (order.profile_id === null) {
+      const token = (req.body as { guestPaymentToken?: unknown }).guestPaymentToken;
+      const storedHash = order.guest_payment_token_hash?.trim();
+      if (typeof token !== 'string' || !storedHash || !/^[a-f0-9]{64}$/i.test(storedHash)) {
+        throw AppError.forbidden('You do not have access to this order');
+      }
+      const suppliedHash = crypto.createHash('sha256').update(token).digest();
+      if (!crypto.timingSafeEqual(Buffer.from(storedHash, 'hex'), suppliedHash)) {
+        throw AppError.forbidden('You do not have access to this order');
+      }
+    }
+
     if (order.payment_status === 'paid') {
-      throw AppError.badRequest('This order has already been paid');
+      sendSuccess(res, 'Order already paid', { historyId: order.id, paymentStatus: 'paid' });
+      return;
     }
 
     // Resolve the customer email
@@ -65,24 +102,20 @@ export async function initializePayment(
       );
       email = profileResult.rows[0]?.email ?? null;
     }
-    // If a token was supplied, prefer the authenticated user's email
-    if (req.user?.email) email = req.user.email;
-
     if (!email) throw AppError.badRequest('No email address found for this order');
 
-    // Enforce ownership: authenticated users may only pay their own orders
-    if (req.user && order.profile_id && order.profile_id !== req.user.id) {
-      throw AppError.forbidden('You do not have access to this order');
-    }
-
-    // Convert to smallest unit (×100) — works for NGN kobo, USD cents, GBP pence, etc.
-    const orderCurrency = (order.selected_currency ?? order.currency ?? 'NGN').toUpperCase();
+    // Order totals are stored in NGN; Paystack expects the amount in kobo.
     const amountSmallestUnit = Math.round(parseFloat(order.total_snapshot) * 100);
     if (amountSmallestUnit <= 0) throw AppError.badRequest('Order amount must be greater than zero');
 
-    const txResult = await initializePaystackTransaction(historyId, email, amountSmallestUnit, orderCurrency, {
+    const txResult = await initializePaystackTransaction(historyId, email, amountSmallestUnit, {
       orderNumber: order.order_number,
     });
+
+    if (txResult.status === 'paid') {
+      sendSuccess(res, 'Order already paid', { historyId: order.id, paymentStatus: 'paid' });
+      return;
+    }
 
     sendSuccess(res, 'Payment initialized', {
       accessCode: txResult.accessCode,

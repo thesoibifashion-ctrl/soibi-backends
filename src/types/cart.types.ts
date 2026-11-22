@@ -80,6 +80,8 @@ export interface CartHistory {
   guestEmail: string | null;
   guestPhone: string | null;
   status: string;
+  paymentStatus: 'unpaid' | 'pending_approval' | 'paid' | 'rejected';
+  paymentRejectionReason: string | null;
   contactMethod: string | null;
   state: string | null;
   city: string | null;
@@ -167,6 +169,11 @@ export interface CartSubmitInput {
   selectedCurrency?: string | null;
 }
 
+export interface PaystackPrepareInput extends CartSubmitInput {
+  historyId?: string;
+  guestPaymentToken?: string;
+}
+
 export interface ProductPriceSnapshot {
   currencyId: string;
   currency: string;
@@ -181,6 +188,8 @@ export interface UpdateCartOrderStatusInput {
 }
 
 export interface UpdateCartOrderPaymentInput {
+  paymentStatus?: 'unpaid' | 'pending_approval' | 'paid' | 'rejected';
+  paymentRejectionReason?: string | null;
   paymentUrl?: string | null;
   receiptUrl?: string | null;
   receiptPublicId?: string | null;

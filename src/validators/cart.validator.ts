@@ -62,6 +62,8 @@ export const updateCartOrderStatusSchema = z.object({
 });
 
 export const updateCartOrderPaymentSchema = z.object({
+  paymentStatus: z.enum(['unpaid', 'pending_approval', 'paid', 'rejected']).optional(),
+  paymentRejectionReason: z.string().trim().max(500).optional(),
   paymentUrl: z.string().url('paymentUrl must be a valid URL').nullable().optional(),
   receiptUrl: z.string().url('receiptUrl must be a valid URL').nullable().optional(),
   receiptPublicId: z.string().trim().max(255).nullable().optional(),
@@ -69,8 +71,9 @@ export const updateCartOrderPaymentSchema = z.object({
   city: z.string().trim().max(100).nullable().optional(),
   address: z.string().trim().max(2000).nullable().optional(),
 }).refine(
-  (d) => Object.values(d).some((value) => value !== undefined),
-  'At least one payment or address field must be provided',
+  (d) => Object.entries(d).some(([key, value]) => key !== 'paymentRejectionReason' && value !== undefined)
+    && (d.paymentRejectionReason === undefined || d.paymentStatus === 'rejected'),
+  'At least one payment, address, or payment status field must be provided',
 );
 
 export const submitReceiptSchema = z.object({
@@ -109,3 +112,11 @@ export const submitCartSchema = z.object({
   receiptUrl: z.string().url('receiptUrl must be a valid URL').nullable().optional(),
   selectedCurrency: z.string().trim().regex(/^[A-Za-z]{3}$/, 'selectedCurrency must be a three-letter code').transform((value) => value.toUpperCase()).nullable().optional(),
 });
+
+export const preparePaystackSchema = submitCartSchema.extend({
+  historyId: z.string().uuid('historyId must be a valid UUID').optional(),
+  guestPaymentToken: z.string().min(1).optional(),
+}).refine(
+  (data) => (data.historyId === undefined) === (data.guestPaymentToken === undefined),
+  'historyId and guestPaymentToken must be provided together',
+);

@@ -1,3 +1,4 @@
+import { createHash, randomBytes } from 'node:crypto';
 import {
   addItemToActiveCart,
   clearActiveCart,
@@ -8,6 +9,8 @@ import {
   findOrCreateActiveCart,
   submitActiveCart,
   submitGuestCart as persistGuestCart,
+  prepareActiveCartPayment,
+  prepareGuestCartPayment,
   updateCartItem,
   findAllCartOrdersAdmin,
   findCartOrderByIdAdmin,
@@ -21,8 +24,9 @@ import {
 import { AppError } from '../utils/AppError.js';
 import { sendEmail } from '../utils/mailer.js';
 import { buildCartSubmissionEmail } from '../utils/cartSubmissionEmail.js';
-import { buildCustomerCartEmail, buildCustomerStatusEmail } from '../utils/customerEmails.js';
+import { buildCustomerCartEmail, buildCustomerStatusEmail, buildCustomerPaymentEmail } from '../utils/customerEmails.js';
 import { getNotificationSettings } from '../utils/notificationSettings.js';
+import { getSettingsMap } from '../repositories/settings.repository.js';
 import { assertActiveCurrencyCodes } from './currency.service.js';
 import { env } from '../config/env.js';
 import type {
@@ -31,6 +35,7 @@ import type {
   Cart,
   CartHistory,
   CartSubmitInput,
+  PaystackPrepareInput,
   CartSubmitResult,
   UpdateCartItemInput,
   UpdateCartOrderPaymentInput,
@@ -129,6 +134,48 @@ export async function submitGuestCart(input: CartSubmitInput): Promise<CartSubmi
     orderNumber: result.orderNumber,
     newActiveCartId: null,
   };
+}
+
+export async function preparePaystackOrder(
+  user: AuthUser | undefined,
+  input: PaystackPrepareInput,
+): Promise<{ historyId: string; orderNumber: string; guestPaymentToken?: string }> {
+  if (user) {
+    try {
+      const prepared = await prepareActiveCartPayment(user.id, input.contactMethod);
+      return { historyId: prepared.historyId, orderNumber: prepared.orderNumber };
+    } catch (error) {
+      if (error instanceof Error && error.message === 'NO_ACTIVE_CART') throw AppError.notFound('No active cart found');
+      if (error instanceof Error && error.message === 'EMPTY_ACTIVE_CART') {
+        throw AppError.badRequest('items must contain at least one item');
+      }
+      throw error;
+    }
+  }
+
+  if (!input.items?.length) throw AppError.badRequest('items must contain at least one item');
+  await assertActiveCurrencyCodes(input.items.map((item) => item.currency));
+  const rawToken = randomBytes(32).toString('base64url');
+  const tokenHash = createHash('sha256').update(rawToken).digest('hex');
+  const previousTokenHash = input.guestPaymentToken
+    ? createHash('sha256').update(input.guestPaymentToken).digest('hex')
+    : undefined;
+  try {
+    const result = await prepareGuestCartPayment(input, tokenHash, input.historyId, previousTokenHash);
+    return {
+      historyId: result.historyId,
+      orderNumber: result.orderNumber,
+      ...(result.reused ? {} : { guestPaymentToken: rawToken }),
+    };
+  } catch (error) {
+    if (error instanceof Error && error.message === 'INVALID_GUEST_PAYMENT_TOKEN') {
+      throw AppError.forbidden('You do not have access to this order');
+    }
+    if (error instanceof Error && error.message === 'EMPTY_GUEST_CART') {
+      throw AppError.badRequest('items must contain at least one item');
+    }
+    throw error;
+  }
 }
 
 async function sendCartEmails(
@@ -236,6 +283,7 @@ export async function getAllCartOrdersAdmin(filters: {
   profileId?: string;
   productId?: string;
   status?: string;
+  paymentStatus?: string;
 }): Promise<AdminCartOrder[]> {
   return findAllCartOrdersAdmin(filters);
 }
@@ -294,7 +342,44 @@ export async function setCartOrderPayment(id: string, input: UpdateCartOrderPaym
   if (!updated) throw AppError.notFound('Order not found');
   const order = await findCartOrderByIdAdmin(id);
   if (!order) throw AppError.notFound('Order not found after update');
+  if (updated.changed && (input.paymentStatus === 'paid' || input.paymentStatus === 'rejected') && order.customerEmail) {
+    const event = input.paymentStatus === 'paid' ? 'transfer_payment_paid' : 'transfer_payment_rejected';
+    void sendTransferPaymentEmail(order, input.paymentStatus, input.paymentRejectionReason ?? null).catch((error: unknown) => {
+      console.error('[cart] Payment email failed', { orderId: id, event, error });
+    });
+  }
   return order;
+}
+
+async function sendTransferPaymentEmail(
+  order: AdminCartOrder,
+  paymentStatus: 'paid' | 'rejected',
+  rejectionReason: string | null,
+): Promise<void> {
+  const settings = await getNotificationSettings();
+  if (!settings.notifyCustomerOnOrderStatus || !order.customerEmail) return;
+  const contacts = paymentStatus === 'rejected'
+    ? await getSettingsMap(['contact_email', 'whatsapp_number'])
+    : {};
+  const paid = paymentStatus === 'paid';
+  const title = paid ? 'Your payment has been confirmed' : "We couldn't confirm your payment";
+  const html = buildCustomerPaymentEmail({
+    customerName: order.customerName ?? 'Valued Customer',
+    orderNumber: order.orderNumber ?? order.id,
+    title,
+    message: paid
+      ? 'We have confirmed your payment. Our team will be in touch with the next steps shortly.'
+      : 'We were unable to confirm your payment.',
+    items: order.items,
+    total: order.totalSnapshot,
+    currency: order.currency,
+    ...(paid ? {} : {
+      rejectionReason,
+      storeEmail: contacts['contact_email'] ?? null,
+      whatsappNumber: contacts['whatsapp_number'] ?? null,
+    }),
+  });
+  await sendEmail({ to: order.customerEmail, subject: title, html });
 }
 
 export async function setCartOrderFulfillment(id: string, input: UpdateOrderFulfillmentInput): Promise<AdminCartOrder> {

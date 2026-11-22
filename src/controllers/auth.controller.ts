@@ -125,12 +125,23 @@ export async function refresh(req: Request, res: Response, next: NextFunction): 
 }
 
 export async function logout(req: Request, res: Response, next: NextFunction): Promise<void> {
-  try {
-    const token = req.cookies?.[REFRESH_TOKEN_COOKIE] as unknown;
-    if (typeof token === 'string') await logoutSession(token);
-    res.clearCookie(REFRESH_TOKEN_COOKIE, clearRefreshCookieOptions);
-    sendSuccess(res, 'Signed out');
-  } catch (error) { next(error); }
+  res.clearCookie(REFRESH_TOKEN_COOKIE, clearRefreshCookieOptions);
+
+  const token = req.cookies?.[REFRESH_TOKEN_COOKIE] as unknown;
+  if (typeof token === 'string') {
+    try {
+      await logoutSession(token);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      console.error('[auth] Failed to revoke refresh token during logout', {
+        method: req.method,
+        path: req.path,
+        error: detail.split(token).join('[redacted]'),
+      });
+    }
+  }
+
+  sendSuccess(res, 'Signed out');
 }
 
 export function getMe(req: MaybeAuthenticatedRequest, res: Response): void {

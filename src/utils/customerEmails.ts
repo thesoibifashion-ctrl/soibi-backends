@@ -304,6 +304,40 @@ export function buildCustomerStatusEmail(data: CustomerStatusEmailData): string 
   });
 }
 
+export function buildCustomerPaymentEmail(data: {
+  customerName: string;
+  orderNumber: string;
+  title: string;
+  message: string;
+  items: CartHistoryItem[];
+  total: number;
+  currency: string | null;
+  rejectionReason?: string | null;
+  storeEmail?: string | null;
+  whatsappNumber?: string | null;
+}): string {
+  const reason = data.rejectionReason
+    ? `<p style="font:14px/1.7 Arial,sans-serif;color:${BRAND.black};"><strong>Reason:</strong> ${val(data.rejectionReason)}</p>`
+    : '';
+  const nextSteps = data.rejectionReason === undefined ? '' : `
+    <p style="font:14px/1.7 Arial,sans-serif;color:${BRAND.black};">
+      Please contact us for more information${data.storeEmail || data.whatsappNumber ? ': ' : '.'}
+      ${data.storeEmail ? `Email <a href="mailto:${val(data.storeEmail)}">${val(data.storeEmail)}</a>` : ''}
+      ${data.storeEmail && data.whatsappNumber ? ' or ' : ''}
+      ${data.whatsappNumber ? `WhatsApp ${val(data.whatsappNumber)}` : ''}
+      ${data.storeEmail || data.whatsappNumber ? '.' : ''}
+    </p>`;
+  const total = data.currency ? `${val(data.currency)} ${data.total.toLocaleString('en-NG')}` : formatPrice(data.total);
+  return customerEmailShell({
+    title: `${data.title} — Soibi`, heading: data.title, badgeLabel: 'Payment Update',
+    bodyHtml: `
+      <p style="font:15px/1.7 Arial,sans-serif;color:${BRAND.black};">Hi ${val(data.customerName)},<br /><br />${data.message}</p>
+      <p style="font:14px/1.7 Arial,sans-serif;color:${BRAND.black};"><strong>Order:</strong> ${val(data.orderNumber)}<br /><strong>Total:</strong> ${total}</p>
+      ${reason}${nextSteps}${customerOrderItemsBlock(data.items)}
+    `,
+  });
+}
+
 // ─── Contact confirmation (customer) ─────────────────────────────────────────
 
 export function buildCustomerContactEmail(name: string, subject: string | null): string {

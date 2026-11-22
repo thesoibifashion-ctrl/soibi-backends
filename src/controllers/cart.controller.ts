@@ -165,6 +165,7 @@ export async function listAdminCartOrders(req: MaybeAuthenticatedRequest, res: R
       profileId: getString('customerId'),
       productId: getString('productId'),
       status: getString('status'),
+      paymentStatus: getString('paymentStatus'),
     });
     sendSuccess(res, 'Cart orders retrieved', orders);
   } catch (err) { next(err); }
@@ -206,6 +207,8 @@ export async function trackMyCartOrder(req: MaybeAuthenticatedRequest, res: Resp
     const order = await trackCartOrderByNumber(req.params['orderNumber'] as string);
     sendSuccess(res, 'Order tracking retrieved', {
       orderNumber: order.orderNumber, orderType: 'cart', status: order.status,
+      paymentStatus: order.paymentStatus,
+      paymentRejectionReason: order.paymentRejectionReason,
       statusHistory: (order.statusHistory ?? []).map((entry) => ({ status: entry.newStatus, previousStatus: entry.oldStatus, createdAt: entry.createdAt })),
       submittedAt: order.completedAt, createdAt: order.createdAt, items: order.items, total: order.totalSnapshot, currency: order.currency,
       selectedCurrency: order.selectedCurrency,

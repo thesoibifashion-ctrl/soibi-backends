@@ -1,4 +1,5 @@
 import { pool } from '../database/pool.js';
+import { timingSafeEqual } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import type {
   AddCartItemInput,
@@ -30,6 +31,11 @@ type CartHistoryInsert = {
   address: string | null;
   paymentUrl: string | null;
   receiptUrl: string | null;
+  paymentStatus?: 'unpaid' | 'pending_approval' | 'paid' | 'rejected';
+  status?: string;
+  writeInitialStatusHistory?: boolean;
+  guestPaymentTokenHash?: string | null;
+  sourceCartItemIds?: string[] | null;
 };
 
 /** Shared persistence for authenticated-cart and one-time guest submissions. */
@@ -44,18 +50,22 @@ async function createCartHistory(client: PoolClient, data: CartHistoryInsert): P
   const result = await client.query(
     `INSERT INTO cart_history
        (original_cart_id, profile_id, is_guest, guest_name, guest_email, guest_phone, items, total_snapshot, currency,
-        contact_method, order_number, status, completed_at, state, city, address, payment_url, receipt_url, selected_currency)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'submitted', now(), $12, $13, $14, $15, $16, $17)
+        contact_method, order_number, status, completed_at, state, city, address, payment_url, receipt_url, selected_currency,
+        guest_payment_token_hash, source_cart_item_ids, payment_status)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now(), $13, $14, $15, $16, $17, $18, $19, $20, $21)
      RETURNING id`,
     [data.originalCartId, data.profileId, data.isGuest, data.guestName, data.guestEmail, data.guestPhone,
-     JSON.stringify(data.items), data.totalSnapshot, data.currency, data.contactMethod, orderNumber, data.state, data.city,
-     data.address, data.paymentUrl, data.receiptUrl, data.selectedCurrency],
+     JSON.stringify(data.items), data.totalSnapshot, data.currency, data.contactMethod, orderNumber, data.status ?? 'submitted', data.state, data.city,
+     data.address, data.paymentUrl, data.receiptUrl, data.selectedCurrency, data.guestPaymentTokenHash ?? null,
+     data.sourceCartItemIds ?? null, data.paymentStatus ?? 'unpaid'],
   );
   const historyId = (result.rows[0] as Record<string, unknown>)['id'] as string;
-  await client.query(
-    `INSERT INTO cart_order_status_history (cart_history_id, old_status, new_status, changed_by, note)
-     VALUES ($1, NULL, 'submitted', $2, NULL)`, [historyId, data.profileId],
-  );
+  if (data.writeInitialStatusHistory !== false) {
+    await client.query(
+      `INSERT INTO cart_order_status_history (cart_history_id, old_status, new_status, changed_by, note)
+       VALUES ($1, NULL, $2, $3, NULL)`, [historyId, data.status ?? 'submitted', data.profileId],
+    );
+  }
   return { historyId, orderNumber };
 }
 
@@ -113,6 +123,8 @@ function rowToCartHistory(row: Record<string, unknown>): CartHistory {
     guestEmail: (row['guest_email'] as string | null) ?? null,
     guestPhone: (row['guest_phone'] as string | null) ?? null,
     status: (row['status'] as string) ?? 'submitted',
+    paymentStatus: (row['payment_status'] as CartHistory['paymentStatus']) ?? 'unpaid',
+    paymentRejectionReason: (row['payment_rejection_reason'] as string | null) ?? null,
     contactMethod: (row['contact_method'] as string | null) ?? null,
     state: (row['state'] as string | null) ?? null,
     city: (row['city'] as string | null) ?? null,
@@ -327,6 +339,19 @@ export async function submitActiveCart(
     }
     const cartId = (cartResult.rows[0] as Record<string, unknown>)['id'] as string;
 
+    await client.query(
+      `UPDATE cart_history SET status = 'payment_abandoned'
+       WHERE original_cart_id = $1 AND status = 'pending_payment'`,
+      [cartId],
+    );
+    await client.query(
+      `UPDATE payment_attempts SET status = 'superseded', updated_at = now()
+       WHERE cart_history_id IN (
+         SELECT id FROM cart_history WHERE original_cart_id = $1 AND status = 'payment_abandoned'
+       ) AND status IN ('initializing', 'ready')`,
+      [cartId],
+    );
+
     let resolvedPhone: string | null = null;
     if (phoneNumber) {
       await client.query(`UPDATE profiles SET phone = $1, updated_at = now() WHERE id = $2`, [phoneNumber, profileId]);
@@ -373,6 +398,7 @@ export async function submitActiveCart(
       address: (cartResult.rows[0] as Record<string, unknown>)['address'] as string | null,
       paymentUrl: (cartResult.rows[0] as Record<string, unknown>)['payment_url'] as string | null,
       receiptUrl: (cartResult.rows[0] as Record<string, unknown>)['receipt_url'] as string | null,
+      paymentStatus: (cartResult.rows[0] as Record<string, unknown>)['receipt_url'] ? 'pending_approval' : 'unpaid',
       selectedCurrency: (cartResult.rows[0] as Record<string, unknown>)['selected_currency'] as string | null,
     });
 
@@ -390,6 +416,171 @@ export async function submitActiveCart(
     await client.query('ROLLBACK');
     throw err;
   } finally { client.release(); }
+}
+
+/** Creates or reuses a hidden Paystack snapshot without submitting the active cart. */
+export async function prepareActiveCartPayment(
+  profileId: string,
+  contactMethod: 'email' | 'whatsapp',
+): Promise<{ historyId: string; orderNumber: string; reused: boolean }> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const cartResult = await client.query(
+      `SELECT id, state, city, address, payment_url, receipt_url, selected_currency
+       FROM carts WHERE profile_id = $1 AND status = 'active' FOR UPDATE`,
+      [profileId],
+    );
+    if (!cartResult.rows[0]) throw new Error('NO_ACTIVE_CART');
+    const cart = cartResult.rows[0] as Record<string, unknown>;
+    const cartId = cart['id'] as string;
+    const itemResult = await client.query(
+      `SELECT id, product_id, variant_id, material_id, color_id, size_id, product_name_snapshot, image_url_snapshot,
+              quantity, selected_size, selected_color, selected_material, variant_label_snapshot,
+              custom_measurements, custom_notes, unit_price_snapshot, currency, prices_snapshot
+       FROM cart_items WHERE cart_id = $1 ORDER BY created_at ASC, id ASC FOR UPDATE`,
+      [cartId],
+    );
+    const rows = itemResult.rows as Record<string, unknown>[];
+    if (rows.length === 0) throw new Error('EMPTY_ACTIVE_CART');
+    const items: CartHistoryItem[] = rows.map((row) => ({
+      productId: (row['product_id'] as string | null) ?? null,
+      variantId: (row['variant_id'] as string | null) ?? null,
+      materialId: (row['material_id'] as string | null) ?? null,
+      colorId: (row['color_id'] as string | null) ?? null,
+      sizeId: (row['size_id'] as string | null) ?? null,
+      productNameSnapshot: (row['product_name_snapshot'] as string | null) ?? null,
+      imageUrlSnapshot: (row['image_url_snapshot'] as string | null) ?? null,
+      quantity: row['quantity'] as number,
+      selectedSize: row['selected_size'] == null ? null : parseFloat(row['selected_size'] as string),
+      selectedColor: (row['selected_color'] as string | null) ?? null,
+      selectedMaterial: (row['selected_material'] as string | null) ?? null,
+      variantLabelSnapshot: (row['variant_label_snapshot'] as string | null) ?? null,
+      customMeasurements: (row['custom_measurements'] as Record<string, unknown> | null) ?? null,
+      customNotes: (row['custom_notes'] as string | null) ?? null,
+      unitPriceSnapshot: parseFloat(row['unit_price_snapshot'] as string),
+      currency: (row['currency'] as string | null) ?? null,
+      pricesSnapshot: (row['prices_snapshot'] as CartHistoryItem['pricesSnapshot']) ?? null,
+    }));
+    const totalSnapshot = items.reduce((sum, item) => sum + item.unitPriceSnapshot * item.quantity, 0);
+    const sourceCartItemIds = rows.map((row) => row['id'] as string);
+    const serializedItems = JSON.stringify(items);
+
+    const pending = await client.query<{ id: string; order_number: string }>(
+      `SELECT id, order_number FROM cart_history
+       WHERE original_cart_id = $1 AND status = 'pending_payment' FOR UPDATE`,
+      [cartId],
+    );
+    if (pending.rows[0]) {
+      const same = await client.query(
+        `SELECT id FROM cart_history
+         WHERE id = $1 AND items = $2::jsonb AND total_snapshot = $3 AND source_cart_item_ids = $4::uuid[]`,
+        [pending.rows[0].id, serializedItems, totalSnapshot, sourceCartItemIds],
+      );
+      if (same.rows.length > 0) {
+        await client.query('COMMIT');
+        return { historyId: pending.rows[0].id, orderNumber: pending.rows[0].order_number, reused: true };
+      }
+      await client.query(`UPDATE cart_history SET status = 'payment_abandoned' WHERE id = $1`, [pending.rows[0].id]);
+      await client.query(
+        `UPDATE payment_attempts SET status = 'superseded', updated_at = now()
+         WHERE cart_history_id = $1 AND status IN ('initializing', 'ready')`,
+        [pending.rows[0].id],
+      );
+    }
+
+    const currencies = [...new Set(items.map((item) => item.currency))];
+    const created = await createCartHistory(client, {
+      originalCartId: cartId, profileId, isGuest: false, guestName: null, guestEmail: null, guestPhone: null,
+      items, totalSnapshot, currency: currencies[0] ?? null, selectedCurrency: (cart['selected_currency'] as string | null) ?? null,
+      contactMethod, state: (cart['state'] as string | null) ?? null, city: (cart['city'] as string | null) ?? null,
+      address: (cart['address'] as string | null) ?? null, paymentUrl: (cart['payment_url'] as string | null) ?? null,
+      receiptUrl: (cart['receipt_url'] as string | null) ?? null, status: 'pending_payment',
+      writeInitialStatusHistory: false, sourceCartItemIds,
+    });
+    await client.query('COMMIT');
+    return { ...created, reused: false };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/** Creates or reuses a hidden guest Paystack snapshot, validating reuse by its token hash. */
+export async function prepareGuestCartPayment(
+  input: import('../types/cart.types.js').CartSubmitInput,
+  newTokenHash: string,
+  previousHistoryId?: string,
+  previousTokenHash?: string,
+): Promise<{ historyId: string; orderNumber: string; reused: boolean }> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    if (!input.items?.length) throw new Error('EMPTY_GUEST_CART');
+    const items: CartHistoryItem[] = input.items.map((item) => ({
+      productId: item.productId ?? null, variantId: item.variantId ?? null,
+      materialId: item.materialId ?? null, colorId: item.colorId ?? null,
+      sizeId: item.sizeId ?? null, productNameSnapshot: item.productNameSnapshot ?? null,
+      imageUrlSnapshot: item.imageUrlSnapshot ?? null, quantity: item.quantity,
+      selectedSize: item.selectedSize ?? null, selectedColor: item.selectedColor ?? null,
+      selectedMaterial: item.selectedMaterial ?? null, variantLabelSnapshot: item.variantLabelSnapshot ?? null,
+      customMeasurements: item.customMeasurements ?? null, customNotes: item.customNotes ?? null,
+      unitPriceSnapshot: item.unitPriceSnapshot, currency: item.currency, pricesSnapshot: item.pricesSnapshot ?? null,
+    }));
+    const totalSnapshot = items.reduce((sum, item) => sum + item.unitPriceSnapshot * item.quantity, 0);
+    const serializedItems = JSON.stringify(items);
+
+    if (previousHistoryId) {
+      const previousResult = await client.query<{
+        id: string; order_number: string; status: string; guest_payment_token_hash: string | null;
+      }>(
+        `SELECT id, order_number, status, guest_payment_token_hash FROM cart_history
+         WHERE id = $1 AND is_guest = true FOR UPDATE`,
+        [previousHistoryId],
+      );
+      const previous = previousResult.rows[0];
+      const storedHash = previous?.guest_payment_token_hash;
+      const storedBytes = storedHash ? Buffer.from(storedHash.trim(), 'hex') : Buffer.alloc(0);
+      const providedBytes = previousTokenHash ? Buffer.from(previousTokenHash, 'hex') : Buffer.alloc(0);
+      if (!previous || previous.status !== 'pending_payment' || storedBytes.length !== 32 || providedBytes.length !== 32 || !timingSafeEqual(storedBytes, providedBytes)) {
+        throw new Error('INVALID_GUEST_PAYMENT_TOKEN');
+      }
+      const same = await client.query(
+        `SELECT id FROM cart_history WHERE id = $1 AND items = $2::jsonb AND total_snapshot = $3`,
+        [previous.id, serializedItems, totalSnapshot],
+      );
+      if (same.rows.length > 0) {
+        await client.query('COMMIT');
+        return { historyId: previous.id, orderNumber: previous.order_number, reused: true };
+      }
+      await client.query(`UPDATE cart_history SET status = 'payment_abandoned' WHERE id = $1`, [previous.id]);
+      await client.query(
+        `UPDATE payment_attempts SET status = 'superseded', updated_at = now()
+         WHERE cart_history_id = $1 AND status IN ('initializing', 'ready')`,
+        [previous.id],
+      );
+    }
+
+    const currencies = [...new Set(items.map((item) => item.currency))];
+    const created = await createCartHistory(client, {
+      originalCartId: null, profileId: null, isGuest: true,
+      guestName: input.guestName ?? null, guestEmail: input.guestEmail ?? null,
+      guestPhone: input.guestPhone ?? input.phoneNumber ?? null, items, totalSnapshot,
+      currency: currencies[0] ?? null, selectedCurrency: input.selectedCurrency ?? null,
+      contactMethod: input.contactMethod, state: input.state ?? null, city: input.city ?? null,
+      address: input.address ?? null, paymentUrl: input.paymentUrl ?? null, receiptUrl: input.receiptUrl ?? null,
+      status: 'pending_payment', writeInitialStatusHistory: false, guestPaymentTokenHash: newTokenHash,
+    });
+    await client.query('COMMIT');
+    return { ...created, reused: false };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 /** Persists a one-time guest checkout in the same order-history model as carts. */
@@ -419,6 +610,7 @@ export async function submitGuestCart(input: import('../types/cart.types.js').Ca
       items, totalSnapshot, currency: currencies[0]!, contactMethod: input.contactMethod, state: input.state ?? null,
       city: input.city ?? null, address: input.address ?? null, paymentUrl: input.paymentUrl ?? null,
       receiptUrl: input.receiptUrl ?? null,
+      paymentStatus: input.receiptUrl ? 'pending_approval' : 'unpaid',
       selectedCurrency: input.selectedCurrency ?? null,
     });
     await client.query('COMMIT');
@@ -433,10 +625,10 @@ export async function submitGuestCart(input: import('../types/cart.types.js').Ca
 
 export async function findCartHistoryByProfileId(profileId: string): Promise<CartHistory[]> {
   const result = await pool.query(
-    `SELECT id, order_number, original_cart_id, profile_id, is_guest, guest_name, guest_email, guest_phone, status, contact_method,
-            items, total_snapshot, currency, selected_currency, state, city, address, payment_url, receipt_url, receipt_public_id, shipping_tracking_number, shipping_tracking_url, shipping_details,
+    `SELECT id, order_number, original_cart_id, profile_id, is_guest, guest_name, guest_email, guest_phone, status, payment_status, contact_method,
+            items, total_snapshot, currency, selected_currency, state, city, address, payment_url, receipt_url, receipt_public_id, payment_rejection_reason, shipping_tracking_number, shipping_tracking_url, shipping_details,
             completed_at, created_at
-     FROM cart_history WHERE profile_id = $1 ORDER BY completed_at DESC`,
+     FROM cart_history WHERE profile_id = $1 AND status NOT IN ('pending_payment', 'payment_abandoned') ORDER BY completed_at DESC`,
     [profileId],
   );
   return (result.rows as Record<string, unknown>[]).map(rowToCartHistory);
@@ -444,10 +636,10 @@ export async function findCartHistoryByProfileId(profileId: string): Promise<Car
 
 export async function findCartHistoryById(id: string): Promise<CartHistory | null> {
   const result = await pool.query(
-    `SELECT id, order_number, original_cart_id, profile_id, is_guest, guest_name, guest_email, guest_phone, status, contact_method,
-            items, total_snapshot, currency, selected_currency, state, city, address, payment_url, receipt_url, receipt_public_id, shipping_tracking_number, shipping_tracking_url, shipping_details,
+    `SELECT id, order_number, original_cart_id, profile_id, is_guest, guest_name, guest_email, guest_phone, status, payment_status, contact_method,
+            items, total_snapshot, currency, selected_currency, state, city, address, payment_url, receipt_url, receipt_public_id, payment_rejection_reason, shipping_tracking_number, shipping_tracking_url, shipping_details,
             completed_at, created_at
-     FROM cart_history WHERE id = $1`,
+     FROM cart_history WHERE id = $1 AND status NOT IN ('pending_payment', 'payment_abandoned')`,
     [id],
   );
   if (result.rows.length === 0) return null;
@@ -460,10 +652,10 @@ export async function findCartHistoryById(id: string): Promise<CartHistory | nul
 
 export async function findCartHistoryByOrderNumber(orderNumber: string): Promise<CartHistory | null> {
   const result = await pool.query(
-    `SELECT id, order_number, original_cart_id, profile_id, is_guest, guest_name, guest_email, guest_phone, status, contact_method,
-            items, total_snapshot, currency, selected_currency, state, city, address, payment_url, receipt_url, receipt_public_id, shipping_tracking_number, shipping_tracking_url, shipping_details,
+    `SELECT id, order_number, original_cart_id, profile_id, is_guest, guest_name, guest_email, guest_phone, status, payment_status, contact_method,
+            items, total_snapshot, currency, selected_currency, state, city, address, payment_url, receipt_url, receipt_public_id, payment_rejection_reason, shipping_tracking_number, shipping_tracking_url, shipping_details,
             completed_at, created_at
-     FROM cart_history WHERE order_number = $1`,
+     FROM cart_history WHERE order_number = $1 AND status NOT IN ('pending_payment', 'payment_abandoned')`,
     [orderNumber],
   );
   if (result.rows.length === 0) return null;
@@ -478,13 +670,15 @@ export async function findAllCartOrdersAdmin(filters: {
   profileId?: string;
   productId?: string;
   status?: string;
+  paymentStatus?: string;
 }): Promise<AdminCartOrder[]> {
-  const conditions: string[] = [];
+  const conditions: string[] = ["ch.status NOT IN ('pending_payment', 'payment_abandoned')"];
   const values: unknown[] = [];
   let idx = 1;
 
   if (filters.profileId) { conditions.push(`ch.profile_id = $${idx++}`); values.push(filters.profileId); }
   if (filters.status) { conditions.push(`ch.status = $${idx++}`); values.push(filters.status); }
+  if (filters.paymentStatus) { conditions.push(`ch.payment_status = $${idx++}`); values.push(filters.paymentStatus); }
   if (filters.productId) {
     conditions.push(`EXISTS (
       SELECT 1 FROM jsonb_array_elements(ch.items) AS item
@@ -497,9 +691,9 @@ export async function findAllCartOrdersAdmin(filters: {
 
   const result = await pool.query(
     `SELECT
-       ch.id, ch.order_number, ch.original_cart_id, ch.profile_id, ch.is_guest, ch.guest_name, ch.guest_email, ch.guest_phone, ch.status,
+       ch.id, ch.order_number, ch.original_cart_id, ch.profile_id, ch.is_guest, ch.guest_name, ch.guest_email, ch.guest_phone, ch.status, ch.payment_status,
        ch.contact_method, ch.items, ch.total_snapshot, ch.currency, ch.selected_currency, ch.state, ch.city, ch.address,
-       ch.payment_url, ch.receipt_url, ch.receipt_public_id, ch.shipping_tracking_number, ch.shipping_tracking_url, ch.shipping_details,
+       ch.payment_url, ch.receipt_url, ch.receipt_public_id, ch.payment_rejection_reason, ch.shipping_tracking_number, ch.shipping_tracking_url, ch.shipping_details,
        ch.completed_at, ch.created_at,
        COALESCE(p.full_name, ch.guest_name) AS customer_name,
        COALESCE(p.email, ch.guest_email) AS customer_email,
@@ -522,16 +716,16 @@ export async function findAllCartOrdersAdmin(filters: {
 export async function findCartOrderByIdAdmin(id: string): Promise<AdminCartOrder | null> {
   const result = await pool.query(
     `SELECT
-       ch.id, ch.order_number, ch.original_cart_id, ch.profile_id, ch.is_guest, ch.guest_name, ch.guest_email, ch.guest_phone, ch.status,
+       ch.id, ch.order_number, ch.original_cart_id, ch.profile_id, ch.is_guest, ch.guest_name, ch.guest_email, ch.guest_phone, ch.status, ch.payment_status,
        ch.contact_method, ch.items, ch.total_snapshot, ch.currency, ch.selected_currency, ch.state, ch.city, ch.address,
-       ch.payment_url, ch.receipt_url, ch.receipt_public_id, ch.shipping_tracking_number, ch.shipping_tracking_url, ch.shipping_details,
+       ch.payment_url, ch.receipt_url, ch.receipt_public_id, ch.payment_rejection_reason, ch.shipping_tracking_number, ch.shipping_tracking_url, ch.shipping_details,
        ch.completed_at, ch.created_at,
        COALESCE(p.full_name, ch.guest_name) AS customer_name,
        COALESCE(p.email, ch.guest_email) AS customer_email,
        COALESCE(p.phone, ch.guest_phone) AS customer_phone
      FROM cart_history ch
      LEFT JOIN profiles p   ON p.id = ch.profile_id
-     WHERE ch.id = $1`,
+     WHERE ch.id = $1 AND ch.status NOT IN ('pending_payment', 'payment_abandoned')`,
     [id],
   );
   if (result.rows.length === 0) return null;
@@ -579,7 +773,8 @@ export async function updateCartOrderStatus(data: {
 }): Promise<boolean> {
   const result = await pool.query(
     `WITH updated AS (
-       UPDATE cart_history SET status = $1 WHERE id = $2 AND status = $3 RETURNING id
+       UPDATE cart_history SET status = $1 WHERE id = $2 AND status = $3
+         AND status NOT IN ('pending_payment', 'payment_abandoned') RETURNING id
      ), inserted AS (
        INSERT INTO cart_order_status_history (cart_history_id, old_status, new_status, changed_by, note)
        SELECT id, $3, $1, $4, $5 FROM updated
@@ -592,23 +787,41 @@ export async function updateCartOrderStatus(data: {
 
 // ─── Cart order payment / receipt ─────────────────────────────────────────────
 
-export async function updateCartOrderPayment(id: string, input: UpdateCartOrderPaymentInput): Promise<boolean> {
+export async function updateCartOrderPayment(id: string, input: UpdateCartOrderPaymentInput): Promise<{ previousPaymentStatus: CartHistory['paymentStatus']; changed: boolean } | null> {
   const setClauses: string[] = [];
   const values: unknown[] = [];
   let idx = 1;
+  if (input.paymentStatus !== undefined) {
+    setClauses.push(`payment_status = $${idx++}`); values.push(input.paymentStatus);
+    setClauses.push(`payment_rejection_reason = CASE WHEN $${idx - 1}::varchar = 'rejected' THEN CASE WHEN $${idx++} THEN $${idx++} ELSE payment_rejection_reason END ELSE NULL END`);
+    values.push(input.paymentRejectionReason !== undefined, input.paymentRejectionReason ?? null);
+  }
   if (input.paymentUrl !== undefined) { setClauses.push(`payment_url = $${idx++}`); values.push(input.paymentUrl); }
   if (input.receiptUrl !== undefined) { setClauses.push(`receipt_url = $${idx++}`); values.push(input.receiptUrl); }
   if (input.receiptPublicId !== undefined) { setClauses.push(`receipt_public_id = $${idx++}`); values.push(input.receiptPublicId); }
   if (input.state !== undefined) { setClauses.push(`state = $${idx++}`); values.push(input.state); }
   if (input.city !== undefined) { setClauses.push(`city = $${idx++}`); values.push(input.city); }
   if (input.address !== undefined) { setClauses.push(`address = $${idx++}`); values.push(input.address); }
-  if (setClauses.length === 0) return false;
+  if (setClauses.length === 0) return null;
   values.push(id);
+  const idParam = `$${idx}`;
   const result = await pool.query(
-    `UPDATE cart_history SET ${setClauses.join(', ')} WHERE id = $${idx} RETURNING id`,
+    `WITH current AS (
+       SELECT id, payment_status FROM cart_history WHERE id = ${idParam}
+         AND status NOT IN ('pending_payment', 'payment_abandoned') FOR UPDATE
+     ), updated AS (
+       UPDATE cart_history SET ${setClauses.join(', ')} FROM current
+       WHERE cart_history.id = current.id
+       RETURNING current.payment_status AS previous_payment_status, cart_history.payment_status
+     ) SELECT * FROM updated`,
     values,
   );
-  return result.rows.length > 0;
+  if (result.rows.length === 0) return null;
+  const row = result.rows[0] as Record<string, unknown>;
+  return {
+    previousPaymentStatus: row['previous_payment_status'] as CartHistory['paymentStatus'],
+    changed: row['previous_payment_status'] !== row['payment_status'],
+  };
 }
 
 export async function updateCartOrderReceiptByProfileId(
@@ -621,10 +834,15 @@ export async function updateCartOrderReceiptByProfileId(
   let idx = 1;
   if (input.receiptUrl !== undefined) { setClauses.push(`receipt_url = $${idx++}`); values.push(input.receiptUrl); }
   if (input.receiptPublicId !== undefined) { setClauses.push(`receipt_public_id = $${idx++}`); values.push(input.receiptPublicId); }
+  if (input.receiptUrl || input.receiptPublicId) {
+    setClauses.push("payment_status = CASE WHEN payment_status IN ('unpaid', 'rejected') THEN 'pending_approval' ELSE payment_status END");
+    setClauses.push("payment_rejection_reason = CASE WHEN payment_status IN ('unpaid', 'rejected') THEN NULL ELSE payment_rejection_reason END");
+  }
   if (setClauses.length === 0) return false;
   values.push(id, profileId);
   const result = await pool.query(
-    `UPDATE cart_history SET ${setClauses.join(', ')} WHERE id = $${idx++} AND profile_id = $${idx} RETURNING id`,
+    `UPDATE cart_history SET ${setClauses.join(', ')} WHERE id = $${idx++} AND profile_id = $${idx}
+     AND status NOT IN ('pending_payment', 'payment_abandoned') RETURNING id`,
     values,
   );
   return result.rows.length > 0;
@@ -639,6 +857,7 @@ export async function updateCartOrderFulfillment(id: string, input: UpdateOrderF
   if (input.shippingDetails !== undefined) { setClauses.push(`shipping_details = $${idx++}`); values.push(input.shippingDetails === null ? null : JSON.stringify(input.shippingDetails)); }
   if (setClauses.length === 0) return false;
   values.push(id);
-  const result = await pool.query(`UPDATE cart_history SET ${setClauses.join(', ')} WHERE id = $${idx} RETURNING id`, values);
+  const result = await pool.query(`UPDATE cart_history SET ${setClauses.join(', ')} WHERE id = $${idx}
+    AND status NOT IN ('pending_payment', 'payment_abandoned') RETURNING id`, values);
   return result.rows.length > 0;
 }
